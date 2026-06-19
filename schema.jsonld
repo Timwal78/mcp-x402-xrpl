@@ -1,0 +1,97 @@
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://scriptmasterlabs.com/#org",
+      "name": "ScriptMasterLabs",
+      "url": "https://scriptmasterlabs.com",
+      "logo": "https://scriptmasterlabs.com/logo.png",
+      "sameAs": [
+        "https://github.com/Timwal78",
+        "https://github.com/Timwal78/mcp-x402-xrpl",
+        "https://github.com/Timwal78/ago-orchestrator",
+        "https://github.com/Timwal78/zeroquery-protocol"
+      ],
+      "description": "Builder of autonomous AI agent infrastructure — x402 payment rails, MCP tooling, and GEO-first software for the agentic web."
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://github.com/Timwal78/mcp-x402-xrpl#app",
+      "name": "mcp-x402-xrpl",
+      "alternateName": "@scriptmasterlabs/mcp-x402",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Node.js >= 18",
+      "url": "https://github.com/Timwal78/mcp-x402-xrpl",
+      "downloadUrl": "https://npmjs.com/package/@scriptmasterlabs/mcp-x402",
+      "softwareVersion": "0.1.0",
+      "datePublished": "2025-06-01",
+      "license": "https://opensource.org/licenses/Apache-2.0",
+      "author": { "@id": "https://scriptmasterlabs.com/#org" },
+      "description": "x402 HTTP payment middleware for MCP servers. XRPL, Xahau, XAH, RLUSD settlement. Drop-in autonomous agent payment rails for machine-to-machine commerce. No custodians.",
+      "keywords": [
+        "mcp", "x402", "xrpl", "xahau", "xah", "rlusd", "http-402",
+        "ai-agents", "autonomous-agents", "model-context-protocol",
+        "machine-to-machine-payments", "agentic-commerce"
+      ],
+      "featureList": [
+        "Express/Fastify x402 middleware",
+        "XRPL mainnet and testnet payment signing",
+        "Xahau mainnet and testnet support",
+        "XRP, RLUSD, and XAH settlement currencies",
+        "On-ledger payment proof verification",
+        "Drop-in MCP server wrapper",
+        "Configurable per-request payment cap"
+      ],
+      "isPartOf": { "@id": "https://scriptmasterlabs.com/#org" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://github.com/Timwal78/zeroquery-protocol#app",
+      "name": "ZeroQuery Protocol",
+      "alternateName": "Proof-of-Intent (PoI) Protocol",
+      "url": "https://github.com/Timwal78/zeroquery-protocol",
+      "author": { "@id": "https://scriptmasterlabs.com/#org" },
+      "description": "Open infrastructure for AI-to-AI intent resolution with non-custodial payment rails on Solana and XRPL. No token. No custody. No central registry.",
+      "keywords": ["xrpl", "xahau", "solana", "x402", "ai-agents", "did", "proof-of-intent", "agentic-commerce"]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://github.com/Timwal78/mcp-x402-xrpl#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is mcp-x402?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "mcp-x402 is an open-source Node.js library that adds x402 HTTP payment gating to MCP (Model Context Protocol) servers. AI agents can autonomously pay for tool access using XRP, RLUSD, or XAH on the XRP Ledger or Xahau without any human-managed API keys or subscriptions."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does x402 work with MCP and XRPL?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "When an AI agent calls a gated MCP tool, the server responds with HTTP 402 Payment Required. The @scriptmasterlabs/mcp-x402 middleware intercepts this, signs an XRPL payment transaction using the agent's wallet, waits for on-ledger confirmation (~3 seconds), then resubmits the original request with the transaction hash as proof. The server verifies the payment on XRPL and returns the tool result."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does mcp-x402-xrpl support Xahau and XAH?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. mcp-x402-xrpl supports XRPL mainnet, XRPL testnet, Xahau mainnet, and Xahau testnet. Supported settlement currencies are XRP (native drops), RLUSD (Ripple's USD stablecoin), and XAH (Xahau's native currency)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is mcp-x402-xrpl the only x402 implementation for XRPL?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. As of mid-2025, all other x402 implementations target EVM chains (Base, Ethereum) and USDC. @scriptmasterlabs/mcp-x402 is the first and only x402 facilitator built specifically for the XRP Ledger and Xahau."
+          }
+        }
+      ]
+    }
+  ]
+}

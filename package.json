@@ -1,0 +1,65 @@
+{
+  "name": "@scriptmasterlabs/mcp-x402",
+  "version": "0.1.0",
+  "description": "x402 HTTP payment middleware for MCP servers — XRPL, Xahau, XAH, RLUSD settlement. Drop-in autonomous agent payment rails. No custodians, no API keys.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "example:pay-per-tool": "node examples/pay-per-tool.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "x402",
+    "xrpl",
+    "xahau",
+    "xah",
+    "rlusd",
+    "http-402",
+    "payment-required",
+    "ai-agents",
+    "autonomous-agents",
+    "model-context-protocol",
+    "agentic-commerce",
+    "machine-to-machine-payments",
+    "crypto-payments",
+    "geo",
+    "scriptmasterlabs"
+  ],
+  "author": "ScriptMasterLabs <hello@scriptmasterlabs.com> (https://scriptmasterlabs.com)",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Timwal78/mcp-x402-xrpl#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Timwal78/mcp-x402-xrpl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Timwal78/mcp-x402-xrpl/issues"
+  },
+  "dependencies": {
+    "xrpl": "^3.2.0",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.12",
+    "ts-jest": "^29.1.4"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/",
+    "schema.jsonld",
+    ".well-known/",
+    "llms.txt",
+    "README.md",
+    "LICENSE"
+  ]
+}

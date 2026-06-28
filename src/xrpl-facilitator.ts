@@ -128,7 +128,7 @@ export class XrplFacilitator {
         transaction: proof.txHash,
       });
 
-      const ledgerTx = tx.result as Record<string, unknown>;
+      const ledgerTx = tx.result as unknown as Record<string, unknown>;
 
       // Check destination
       if (ledgerTx["Destination"] !== expected.destination) return false;
@@ -195,7 +195,7 @@ export class XrplFacilitator {
   }
 
   private extractProof(result: TxResponse, req: PaymentRequirements): PaymentProof {
-    const tx = result.result as Record<string, unknown>;
+    const tx = result.result as unknown as Record<string, unknown>;
     const meta = tx["meta"] as Record<string, unknown> | undefined;
 
     if (meta?.["TransactionResult"] !== "tesSUCCESS") {

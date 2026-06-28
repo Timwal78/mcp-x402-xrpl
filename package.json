@@ -1,6 +1,6 @@
 {
   "name": "@scriptmasterlabs/mcp-x402",
-  "version": "0.1.1",
+  "version": "2.1.1",
   "description": "x402 HTTP payment middleware for MCP servers — XRPL, Xahau, XAH, RLUSD settlement. Drop-in autonomous agent payment rails. No custodians, no API keys.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -40,7 +40,7 @@
     "url": "https://github.com/Timwal78/mcp-x402-xrpl/issues"
   },
   "dependencies": {
-    "xrpl": "^3.2.0",
+    "xrpl": "^3.0.0",
     "express": "^4.19.2"
   },
   "devDependencies": {

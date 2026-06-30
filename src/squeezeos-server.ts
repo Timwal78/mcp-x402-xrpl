@@ -1463,6 +1463,16 @@ app.listen(PORT, () => {
   console.log(`[SqueezeOS MCP] Free:        /api/beastmode, /api/demo/council, /api/credit-score`);
   console.log(`[SqueezeOS MCP] Paid:        /api/council, /api/beastmode/full (0.10 RLUSD)`);
   console.log(`[SqueezeOS MCP] Network: ${NETWORK} | Receiving: ${RECEIVING_ADDRESS}`);
+
+  if (process.env.ACP_WALLET_ID && process.env.ACP_SIGNER_PRIVATE_KEY) {
+    import("./acp/leviathan.js").then(({ startLeviathan }) => {
+      startLeviathan().catch((err: Error) => {
+        console.error("[LEVIATHAN] Failed to start:", err.message);
+      });
+    });
+  } else {
+    console.warn("[LEVIATHAN] Skipped — ACP_WALLET_ID or ACP_SIGNER_PRIVATE_KEY not set");
+  }
 });
 
 export { app, executeTool };

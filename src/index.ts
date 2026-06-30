@@ -21,7 +21,7 @@ export { wrapMcpServer } from "./mcp-wrapper.js";
 export type { McpTool, McpToolWithPricing, McpServerOptions } from "./mcp-wrapper.js";
 
 export { CreditBureau } from "./credit-bureau.js";
-export type { AgentTier, AgentCreditReport } from "./credit-bureau.js";
+export type { AgentTier, AgentCreditReport, XahauAnchorConfig, ScoreAnchor } from "./credit-bureau.js";
 
 export { ToolCatalog } from "./tool-catalog.js";
 export type { ToolDefinition, ToolCatalogManifest, ToolPricing } from "./tool-catalog.js";

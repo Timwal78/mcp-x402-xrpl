@@ -19,9 +19,16 @@
  *   bureau:firstSeen:<agentDid>   → ISO timestamp
  *   bureau:lastSeen:<agentDid>    → ISO timestamp
  *   bureau:history:<agentDid>     → list of last 20 call timestamps (LPUSH + LTRIM)
+ *   bureau:anchor:<agentDid>      → JSON { txHash, anchoredAt, network, score, tier }
+ *
+ * On-chain anchor (optional — requires XAHAU_SEED env var):
+ *   After each paid call the new score is anchored on Xahau via a self-payment
+ *   with a Memo containing the score JSON. The txHash is stored in Redis so any
+ *   caller can independently verify the score history on-chain.
  */
 
 import type { Redis } from "ioredis";
+import { Client, Wallet } from "xrpl";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -29,6 +36,7 @@ const SCORE_INITIAL = 300;
 const SCORE_MAX = 850;
 const SCORE_PER_PAID_CALL = 5;
 const HISTORY_MAX = 20;
+const XAHAU_DEFAULT_WS = "wss://xahau.network";
 
 // ─── Tier definition ─────────────────────────────────────────────────────────
 
@@ -47,7 +55,22 @@ const TIERS: AgentTier[] = [
   { name: "QUASAR",    minScore: 800, maxScore: 850, priceRlusd: "0.06", benefit: "Platinum — priority routing + 40% discount" },
 ];
 
-// ─── Report type ──────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface XahauAnchorConfig {
+  /** Xahau account seed for signing anchor transactions (base58 family seed) */
+  xahauSeed?: string;
+  /** Xahau WebSocket node (default: wss://xahau.network) */
+  xahauWs?: string;
+}
+
+export interface ScoreAnchor {
+  txHash: string;
+  network: string;
+  anchoredAt: string;
+  score: number;
+  tier: string;
+}
 
 export interface AgentCreditReport {
   agentDid: string;
@@ -61,15 +84,21 @@ export interface AgentCreditReport {
   priceRlusd: string;
   scale: "300-850 (ARGUS Credit Bureau)";
   benefits: Record<string, string>;
+  /** Xahau on-chain anchor for this agent's latest score. null if not yet anchored. */
+  onChainAnchor: ScoreAnchor | null;
 }
 
 // ─── CreditBureau ─────────────────────────────────────────────────────────────
 
 export class CreditBureau {
   private readonly redis: Redis;
+  private readonly xahauSeed: string | undefined;
+  private readonly xahauWs: string;
 
-  constructor(redis: Redis) {
+  constructor(redis: Redis, anchorConfig?: XahauAnchorConfig) {
     this.redis = redis;
+    this.xahauSeed = anchorConfig?.xahauSeed;
+    this.xahauWs = anchorConfig?.xahauWs ?? XAHAU_DEFAULT_WS;
   }
 
   /** Register an agent DID if not already seen. Score initialises at 300. */
@@ -96,12 +125,15 @@ export class CreditBureau {
   /**
    * Record a successful paid call: +5 pts (capped at 850), update lastSeen,
    * append to history ring buffer. Returns the new score.
+   *
+   * Kicks off an async Xahau anchor (fire-and-forget) if XAHAU_SEED is set.
    */
   async recordPaidCall(agentDid: string): Promise<number> {
     await this.ensureRegistered(agentDid);
     const scoreKey = this.key("score", agentDid);
     const current = await this.getScore(agentDid);
     const next = Math.min(current + SCORE_PER_PAID_CALL, SCORE_MAX);
+    const tierName = this.getTier(next).name;
     const now = new Date().toISOString();
 
     const pipeline = this.redis.pipeline();
@@ -111,6 +143,13 @@ export class CreditBureau {
     pipeline.lpush(this.key("history", agentDid), now);
     pipeline.ltrim(this.key("history", agentDid), 0, HISTORY_MAX - 1);
     await pipeline.exec();
+
+    // Anchor on Xahau asynchronously — does not block the response
+    if (this.xahauSeed) {
+      this.anchorOnChain(agentDid, next, tierName).catch(() => {
+        // Anchor failure is non-fatal; score is already persisted in Redis
+      });
+    }
 
     return next;
   }
@@ -137,16 +176,18 @@ export class CreditBureau {
   async getFullReport(agentDid: string): Promise<AgentCreditReport> {
     await this.ensureRegistered(agentDid);
 
-    const [scoreRaw, callsRaw, firstSeen, lastSeen, history] = await Promise.all([
+    const [scoreRaw, callsRaw, firstSeen, lastSeen, history, anchorRaw] = await Promise.all([
       this.redis.get(this.key("score", agentDid)),
       this.redis.get(this.key("calls", agentDid)),
       this.redis.get(this.key("firstSeen", agentDid)),
       this.redis.get(this.key("lastSeen", agentDid)),
       this.redis.lrange(this.key("history", agentDid), 0, HISTORY_MAX - 1),
+      this.redis.get(this.key("anchor", agentDid)),
     ]);
 
     const creditScore = scoreRaw !== null ? Number(scoreRaw) : SCORE_INITIAL;
     const tier = this.getTier(creditScore);
+    const onChainAnchor: ScoreAnchor | null = anchorRaw ? (JSON.parse(anchorRaw) as ScoreAnchor) : null;
 
     return {
       agentDid,
@@ -162,6 +203,7 @@ export class CreditBureau {
       benefits: Object.fromEntries(
         TIERS.map((t) => [`${t.minScore}–${t.maxScore} ${t.name}`, t.benefit])
       ),
+      onChainAnchor,
     };
   }
 
@@ -169,5 +211,49 @@ export class CreditBureau {
 
   private key(field: string, agentDid: string): string {
     return `bureau:${field}:${agentDid}`;
+  }
+
+  /**
+   * Anchor an ARGUS score on the Xahau ledger.
+   *
+   * Submits a self-payment (1 drop XAH) with a Memo containing the score JSON.
+   * The resulting txHash is stored in Redis under bureau:anchor:<agentDid>.
+   * Anyone can verify the score history at https://xahau.network/tx/<txHash>.
+   *
+   * Only runs when xahauSeed is set. Throws on failure (caller should catch).
+   */
+  private async anchorOnChain(agentDid: string, score: number, tier: string): Promise<void> {
+    const client = new Client(this.xahauWs);
+    try {
+      await client.connect();
+      const wallet = Wallet.fromSeed(this.xahauSeed!);
+      const now = new Date().toISOString();
+
+      const memoType = Buffer.from("argus/score").toString("hex").toUpperCase();
+      const memoData = Buffer.from(
+        JSON.stringify({ agentDid, score, tier, anchoredAt: now })
+      ).toString("hex").toUpperCase();
+
+      const prepared = await client.autofill({
+        TransactionType: "Payment",
+        Account: wallet.classicAddress,
+        Destination: wallet.classicAddress,
+        Amount: "1",
+        Memos: [{ Memo: { MemoType: memoType, MemoData: memoData } }],
+      });
+
+      const { tx_blob } = wallet.sign(prepared);
+      const response = await client.submitAndWait(tx_blob);
+      const txHash = String((response.result as Record<string, unknown>)["hash"] ?? "");
+
+      if (txHash) {
+        await this.redis.set(
+          this.key("anchor", agentDid),
+          JSON.stringify({ txHash, anchoredAt: now, network: "xahau-mainnet", score, tier }),
+        );
+      }
+    } finally {
+      try { await client.disconnect(); } catch { /* ignore */ }
+    }
   }
 }

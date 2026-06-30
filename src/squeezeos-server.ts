@@ -59,7 +59,10 @@ const app = express();
 app.use(express.json());
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
-const bureau = new CreditBureau(redis);
+const bureau = new CreditBureau(redis, {
+  xahauSeed: process.env.XAHAU_SEED,
+  xahauWs: process.env.XAHAU_WS,
+});
 const catalog = new ToolCatalog();
 
 // Attach x402 client middleware (for agent-initiated payments flowing through)
@@ -143,11 +146,14 @@ app.get("/", (_req, res) => {
     description: "Institutional-grade AI market intelligence. Pay per call in RLUSD on XRPL. No subscriptions, no API keys, no accounts.",
     endpoints: {
       discovery: {
-        toolCatalog:    "GET /.well-known/mcp         — full tool manifest with pricing",
-        agentGuide:     "GET /agent                   — step-by-step onboarding playbook",
-        creditScore:    "GET /api/credit-score        — your ARGUS bureau score (free, always)",
-        preFlightQuote: "GET /x402/quote?tool=<id>    — exact cost before spending (free)",
-        health:         "GET /health                  — server liveness",
+        toolCatalog:    "GET /.well-known/mcp                   — full tool manifest with pricing",
+        agentCard:      "GET /.well-known/agent.json            — A2A-compatible AgentCard",
+        agentGuide:     "GET /agent                             — step-by-step onboarding playbook",
+        creditScore:    "GET /api/credit-score                  — your ARGUS bureau score (free, always)",
+        creditAnchor:   "GET /api/credit-score/anchor/:wallet   — Xahau on-chain score anchor proof",
+        leaderboard:    "GET /leaderboard                       — top 50 agents by ARGUS score (public)",
+        preFlightQuote: "GET /x402/quote?tool=<id>              — exact cost before spending (free)",
+        health:         "GET /health                            — server liveness",
       },
       free: {
         beastmodePreview: "GET /api/beastmode          — squeeze signal, top result only (3/day)",
@@ -458,6 +464,9 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
   const score = await bureau.getScore(agentDid);
   const proofHeader = req.headers["x-payment-proof"] as string | undefined;
 
+  // Compute price first — used in both proof verification and 402 response
+  const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
+
   if (proofHeader) {
     // Verify payment on-chain before granting access
     const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
@@ -467,22 +476,24 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
       next();
       return;
     }
-    res.status(403).json({
-      error: "payment_verification_failed",
-      reason: verification.error,
-      protocol: "x402/1.0",
-      note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches receiving address, RLUSD (not XRP), correct issuer, sufficient amount.",
-      agentGuide: `${req.protocol}://${req.get("host")}/agent`,
-      receivingAddress: RECEIVING_ADDRESS,
-      expectedAmount: price,
-      expectedCurrency: "RLUSD",
-      expectedNetwork: "xrpl-mainnet",
-    });
+    res.status(403)
+      .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+      .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+      .json({
+        error: "payment_verification_failed",
+        reason: verification.error,
+        protocol: "x402/1.0",
+        note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches receiving address, RLUSD (not XRP), correct issuer, sufficient amount.",
+        agentGuide: `${req.protocol}://${req.get("host")}/agent`,
+        receivingAddress: RECEIVING_ADDRESS,
+        expectedAmount: price,
+        expectedCurrency: "RLUSD",
+        expectedNetwork: "xrpl-mainnet",
+      });
     return;
   }
 
   // Issue dynamic 402 based on credit score
-  const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
   const agentTier = score >= 800 ? "QUASAR" : score >= 700 ? "PULSAR" : score >= 500 ? "NEUTRON" : "PROTOSTAR";
   const requestedPath = req.path;
   const toolIdGuess = requestedPath.includes("beastmode") ? "beastmode_full"
@@ -506,6 +517,8 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
     .setHeader("X-402-Network", "xrpl-mainnet")
     .setHeader("X-402-Currency", "RLUSD")
     .setHeader("X-402-Amount", price)
+    .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+    .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
     .json({
       error: "payment_required",
       protocol: "x402/1.0",
@@ -696,6 +709,92 @@ app.post(
     executeTool,
   })
 );
+
+// ─── LEADERBOARD — public, no auth ───────────────────────────────────────────
+
+/**
+ * GET /leaderboard — top 50 agents by ARGUS score.
+ * Results are cached in Redis for 30 seconds to avoid blocking key scans.
+ */
+app.get("/leaderboard", async (_req, res) => {
+  const cached = await redis.get("leaderboard:cache");
+  if (cached) {
+    res.setHeader("X-Leaderboard-Cache", "HIT");
+    res.json(JSON.parse(cached) as unknown);
+    return;
+  }
+
+  const keys = await redis.keys("bureau:score:*");
+
+  if (keys.length === 0) {
+    const empty = { leaderboard: [], totalAgents: 0, generatedAt: new Date().toISOString(), note: "No agents registered yet." };
+    res.json(empty);
+    return;
+  }
+
+  const entries = await Promise.all(
+    keys.map(async (key) => {
+      const agentDid = key.replace("bureau:score:", "");
+      const [scoreRaw, callsRaw, lastSeen] = await Promise.all([
+        redis.get(key),
+        redis.get(`bureau:calls:${agentDid}`),
+        redis.get(`bureau:lastSeen:${agentDid}`),
+      ]);
+      const score = Number(scoreRaw ?? 300);
+      return {
+        agentDid,
+        score,
+        tier: bureau.getTier(score).name,
+        calls: Number(callsRaw ?? 0),
+        lastSeen: lastSeen ?? "unknown",
+      };
+    })
+  );
+
+  entries.sort((a, b) => b.score - a.score);
+  const top50 = entries.slice(0, 50);
+
+  const result = {
+    leaderboard: top50,
+    totalAgents: entries.length,
+    generatedAt: new Date().toISOString(),
+    note: "ARGUS Credit Bureau leaderboard — top 50 agents by score. Refreshed every 30 s.",
+    topUpUrl: "https://www.scriptmasterlabs.com/central-bank.html",
+  };
+
+  await redis.set("leaderboard:cache", JSON.stringify(result), "EX", 30);
+  res.setHeader("X-Leaderboard-Cache", "MISS");
+  res.json(result);
+});
+
+// ─── ON-CHAIN ANCHOR LOOKUP ────────────────────────────────────────────────────
+
+/**
+ * GET /api/credit-score/anchor/:wallet — return the Xahau on-chain anchor
+ * for an agent identified by their XRPL wallet address.
+ */
+app.get("/api/credit-score/anchor/:wallet", async (req, res) => {
+  const wallet = req.params.wallet;
+  const agentDid = `did:poi:xrpl:${wallet}`;
+  const anchorRaw = await redis.get(`bureau:anchor:${agentDid}`);
+
+  if (!anchorRaw) {
+    res.status(404).json({
+      error: "no_anchor",
+      message: "No on-chain Xahau anchor found for this wallet. Anchors are written after paid calls when the server is configured with XAHAU_SEED.",
+      agentDid,
+    });
+    return;
+  }
+
+  const anchor = JSON.parse(anchorRaw) as { txHash: string; network: string; anchoredAt: string; score: number; tier: string };
+  res.json({
+    agentDid,
+    onChainAnchor: anchor,
+    verifyUrl: `https://xahau.network/tx/${anchor.txHash}`,
+    note: "Score anchored on Xahau via self-payment memo. Verify independently at the URL above.",
+  });
+});
 
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
 

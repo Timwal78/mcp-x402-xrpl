@@ -61,6 +61,14 @@ const SQUEEZEOS_UPSTREAM_URL = (process.env.SQUEEZEOS_UPSTREAM_URL ?? "").replac
 const SQUEEZEOS_INTERNAL_SECRET = process.env.SQUEEZEOS_INTERNAL_SECRET ?? "";
 
 /**
+ * LEVIATHAN internal bypass secret. When LEVIATHAN (Virtuals ACP seller) sends
+ * X-Leviathan-Key: <this-value>, payment gates are skipped — LEVIATHAN has
+ * already been paid on-chain via Virtuals Protocol ACP (Base USDC).
+ * Must be a strong random value set identically in both services via env var.
+ */
+const LEVIATHAN_BYPASS_SECRET = process.env.LEVIATHAN_BYPASS_SECRET ?? "";
+
+/**
  * Secret used to sign ARGUS verify JWTs. Set this to a strong random value in production.
  * Third-party APIs can call GET /api/credit-score/verify-jwt?token=<token> to validate agent scores.
  */
@@ -596,6 +604,10 @@ async function callUpstream(
 
 /** Dynamic price gate — checks agent credit score, applies VIP if eligible */
 async function dynamicPriceGate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (LEVIATHAN_BYPASS_SECRET && req.headers["x-leviathan-key"] === LEVIATHAN_BYPASS_SECRET) {
+    next();
+    return;
+  }
   const agentDid = (req as Request & { agentDid: string }).agentDid ?? "did:anonymous";
   const score = await bureau.getScore(agentDid);
   const proofHeader = req.headers["x-payment-proof"] as string | undefined;
@@ -962,6 +974,10 @@ app.get("/api/credit-score/history/:wallet", async (req, res) => {
  */
 function fixedPriceGate(price: string) {
   return async function(req: Request, res: Response, next: NextFunction): Promise<void> {
+    if (LEVIATHAN_BYPASS_SECRET && req.headers["x-leviathan-key"] === LEVIATHAN_BYPASS_SECRET) {
+      next();
+      return;
+    }
     const proofHeader = req.headers["x-payment-proof"] as string | undefined;
     if (!proofHeader) {
       res.status(402)

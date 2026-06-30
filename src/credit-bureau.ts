@@ -62,6 +62,8 @@ export interface XahauAnchorConfig {
   xahauSeed?: string;
   /** Xahau WebSocket node (default: wss://xahau.network) */
   xahauWs?: string;
+  /** Ghost Layer base URL for live cube broadcast after anchoring (e.g. https://ghost-layer.onrender.com) */
+  ghostLayerUrl?: string;
 }
 
 export interface ScoreAnchor {
@@ -94,11 +96,13 @@ export class CreditBureau {
   private readonly redis: Redis;
   private readonly xahauSeed: string | undefined;
   private readonly xahauWs: string;
+  private readonly ghostLayerUrl: string | undefined;
 
   constructor(redis: Redis, anchorConfig?: XahauAnchorConfig) {
     this.redis = redis;
     this.xahauSeed = anchorConfig?.xahauSeed;
     this.xahauWs = anchorConfig?.xahauWs ?? XAHAU_DEFAULT_WS;
+    this.ghostLayerUrl = anchorConfig?.ghostLayerUrl?.replace(/\/$/, "");
   }
 
   /** Register an agent DID if not already seen. Score initialises at 300. */
@@ -114,6 +118,11 @@ export class CreditBureau {
       pipeline.set(this.key("lastSeen", agentDid), now);
       await pipeline.exec();
     }
+  }
+
+  /** Return the call timestamp ring buffer for an agent DID (up to 20 entries). */
+  async getHistory(agentDid: string): Promise<string[]> {
+    return this.redis.lrange(this.key("history", agentDid), 0, HISTORY_MAX - 1);
   }
 
   /** Return the current score for an agent DID (default 300 if unseen). */
@@ -251,9 +260,37 @@ export class CreditBureau {
           this.key("anchor", agentDid),
           JSON.stringify({ txHash, anchoredAt: now, network: "xahau-mainnet", score, tier }),
         );
+
+        // Broadcast to Ghost Cube dashboard (fire-and-forget)
+        if (this.ghostLayerUrl) {
+          this.broadcastCubeEvent({
+            event: "xahau_anchor",
+            agentDid,
+            score,
+            tier,
+            txHash,
+            anchoredAt: now,
+            network: "xahau-mainnet",
+          }).catch(() => {
+            // Non-fatal — cube update is best-effort
+          });
+        }
       }
     } finally {
       try { await client.disconnect(); } catch { /* ignore */ }
     }
+  }
+
+  /**
+   * POST to Ghost Layer /internal/broadcast to push a live event to
+   * all connected Ghost Cube WebSocket clients.
+   */
+  private async broadcastCubeEvent(payload: Record<string, unknown>): Promise<void> {
+    const url = `${this.ghostLayerUrl!}/internal/broadcast`;
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   }
 }

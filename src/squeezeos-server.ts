@@ -75,6 +75,7 @@ const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 const bureau = new CreditBureau(redis, {
   xahauSeed: process.env.XAHAU_SEED,
   xahauWs: process.env.XAHAU_WS,
+  ghostLayerUrl: process.env.GHOST_LAYER_URL,
 });
 const catalog = new ToolCatalog();
 
@@ -620,6 +621,9 @@ app.post("/api/council", agentDidMiddleware, dynamicPriceGate, async (req, res) 
   try {
     const data = await callUpstream("POST", "/api/council", req.body as Record<string, unknown>);
     const newScore = await bureau.recordPaidCall(agentDid);
+    const tier = bureau.getTier(newScore);
+    res.setHeader("X-402-Score-Earned", String(newScore));
+    res.setHeader("X-402-Tier", tier.name);
     res.json({
       ...(data as object),
       agentCreditScore: newScore,
@@ -645,6 +649,9 @@ app.post("/api/beastmode/full", agentDidMiddleware, dynamicPriceGate, async (req
   try {
     const data = await callUpstream("POST", "/api/beastmode/full", req.body as Record<string, unknown>);
     const newScore = await bureau.recordPaidCall(agentDid);
+    const tier = bureau.getTier(newScore);
+    res.setHeader("X-402-Score-Earned", String(newScore));
+    res.setHeader("X-402-Tier", tier.name);
     res.json({ ...(data as object), agentCreditScore: newScore, scoreGained: "+5", callsToNextTier: bureau.callsToNextTier(newScore) });
   } catch (err) {
     res.status(502).json({
@@ -658,8 +665,11 @@ app.post("/api/beastmode/full", agentDidMiddleware, dynamicPriceGate, async (req
 /** Full credit report — 0.10 RLUSD */
 app.post("/api/credit-score/report", agentDidMiddleware, dynamicPriceGate, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const newScore = await bureau.recordPaidCall(agentDid);
+  const tier = bureau.getTier(newScore);
+  res.setHeader("X-402-Score-Earned", String(newScore));
+  res.setHeader("X-402-Tier", tier.name);
   const report = await bureau.getFullReport(agentDid);
-
   res.json({ tool: "credit_report", tier: "paid", report });
 });
 
@@ -812,6 +822,38 @@ app.get("/api/credit-score/anchor/:wallet", async (req, res) => {
     onChainAnchor: anchor,
     verifyUrl: `https://xahau.network/tx/${anchor.txHash}`,
     note: "Score anchored on Xahau via self-payment memo. Verify independently at the URL above.",
+  });
+});
+
+// ─── CALL HISTORY — free, public ─────────────────────────────────────────────
+
+/**
+ * GET /api/credit-score/history/:wallet — return the agent's call timestamp
+ * ring buffer (up to 20 entries). Free, no auth required.
+ * Agents can audit their own score progression without paying for the full report.
+ */
+app.get("/api/credit-score/history/:wallet", async (req, res) => {
+  const wallet = req.params.wallet;
+  const agentDid = `did:poi:xrpl:${wallet}`;
+
+  const [score, history, callsRaw] = await Promise.all([
+    bureau.getScore(agentDid),
+    bureau.getHistory(agentDid),
+    redis.get(`bureau:calls:${agentDid}`),
+  ]);
+
+  const tier = bureau.getTier(score);
+
+  res.json({
+    agentDid,
+    wallet,
+    creditScore: score,
+    tier: tier.name,
+    totalPaidCalls: callsRaw !== null ? Number(callsRaw) : 0,
+    callHistory: history,
+    historyNote: "Timestamps of the last 20 paid calls (newest first). Each call earns +5 ARGUS pts.",
+    callsToNextTier: bureau.callsToNextTier(score),
+    fullReportUrl: "/api/credit-score/report (0.10 RLUSD — includes on-chain anchor + benefit details)",
   });
 });
 

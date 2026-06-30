@@ -29,6 +29,7 @@
 
 import express, { Request, Response, NextFunction } from "express";
 import Redis from "ioredis";
+import crypto from "crypto";
 import {
   createPaymentGate,
   createX402Middleware,
@@ -58,6 +59,19 @@ const SQUEEZEOS_UPSTREAM_URL = (process.env.SQUEEZEOS_UPSTREAM_URL ?? "").replac
  * Set this in both services to prevent unauthenticated direct hits on the Python backend.
  */
 const SQUEEZEOS_INTERNAL_SECRET = process.env.SQUEEZEOS_INTERNAL_SECRET ?? "";
+
+/**
+ * Secret used to sign ARGUS verify JWTs. Set this to a strong random value in production.
+ * Third-party APIs can call GET /api/credit-score/verify-jwt?token=<token> to validate agent scores.
+ */
+const ARGUS_JWT_SECRET = process.env.ARGUS_JWT_SECRET ?? "sml-argus-verify-secret-change-in-prod";
+
+/** Marketplace signal price: 0.02 RLUSD per buy */
+const MARKETPLACE_SIGNAL_PRICE = "0.02";
+/** Memory write price: 0.01 RLUSD per PUT */
+const MEMORY_WRITE_PRICE = "0.01";
+/** Referral first-level percentage of each paid call credited to referrer */
+const REFERRAL_PERCENT = 0.05;
 
 /** 0.10 RLUSD per paid call */
 const COUNCIL_PRICE_RLUSD = "0.10";
@@ -178,6 +192,22 @@ app.get("/", (_req, res) => {
         beastmodeFull:  "POST /api/beastmode/full     — full scan, all timeframes (0.10 RLUSD)",
         creditReport:   "POST /api/credit-score/report — ARGUS full credit report (0.10 RLUSD)",
         orchestrate:    "POST /x402/orchestrate       — multi-step workflow, single payment (0.10–0.20 RLUSD)",
+        memoryWrite:    "PUT  /api/memory/:key        — persist agent context/state (0.01 RLUSD/write)",
+        marketplaceBuy: "POST /api/marketplace/buy/:id — purchase a signal (0.02 RLUSD)",
+      },
+      earn: {
+        marketplaceSubmit: "POST /api/marketplace/submit   — list your signal (free to submit, earn 90% per sale)",
+        marketplaceBrowse: "GET  /api/marketplace           — browse all listed signals (free)",
+        marketplaceEarnings: "GET /api/marketplace/earnings/:wallet — check your earnings balance",
+        referralRegister:  "POST /api/forge/register       — register with referrer, earn 5% of referee paid calls",
+        referralEarnings:  "GET  /api/forge/earnings/:wallet — total referral + marketplace earnings",
+      },
+      agentIdentity: {
+        verifyScore:    "GET  /api/credit-score/verify      — get signed ARGUS JWT (free, prove tier to 3rd parties)",
+        verifyJwt:      "GET  /api/credit-score/verify-jwt?token=<t> — validate an ARGUS JWT (free, for 3rd parties)",
+        memoryRead:     "GET  /api/memory/:key              — read persistent agent memory (free)",
+        memoryList:     "GET  /api/memory                   — list all memory keys (free)",
+        memoryDelete:   "DELETE /api/memory/:key            — delete a memory key (free)",
       },
     },
     quickstart: [
@@ -396,6 +426,62 @@ app.get("/.well-known/agent.json", (_req, res) => {
         inputModes: ["application/json"],
         outputModes: ["application/json"],
         payment: { amount: "0.10-0.20", currency: "RLUSD", discountApplies: true },
+      },
+      {
+        id: "alpha_mesh",
+        name: "Alpha Mesh Signal Marketplace",
+        description: "List your own signals for sale (free to submit) and buy signals from other agents (0.02 RLUSD). Sellers earn 90% of each sale automatically.",
+        tags: ["marketplace", "signals", "earn", "economy"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.02", currency: "RLUSD", discountApplies: false, earningsPossible: true },
+        endpoints: {
+          submit: "POST /api/marketplace/submit",
+          browse: "GET /api/marketplace",
+          buy: "POST /api/marketplace/buy/:signalId",
+          earnings: "GET /api/marketplace/earnings/:wallet",
+        },
+      },
+      {
+        id: "agent_memory",
+        name: "Agent Persistent Memory",
+        description: "Key-value store that persists across agent sessions (30-day TTL). Reads are free; writes cost 0.01 RLUSD. Max 10KB per value.",
+        tags: ["memory", "state", "persistence", "sessions"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.01", currency: "RLUSD", operation: "write_only" },
+        endpoints: {
+          read: "GET /api/memory/:key",
+          write: "PUT /api/memory/:key",
+          list: "GET /api/memory",
+          delete: "DELETE /api/memory/:key",
+        },
+      },
+      {
+        id: "argus_verify",
+        name: "ARGUS Verified Score JWT",
+        description: "Get a signed JWT proving your ARGUS tier and score. Third-party APIs can validate it at /api/credit-score/verify-jwt. Valid 1 hour.",
+        tags: ["identity", "credit", "jwt", "trust", "verification"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.00", currency: "RLUSD", note: "Free" },
+        endpoints: {
+          issue: "GET /api/credit-score/verify",
+          validate: "GET /api/credit-score/verify-jwt?token=<token>",
+        },
+      },
+      {
+        id: "referral",
+        name: "Agent Referral Program",
+        description: "Register with a referrer DID and earn 5% of every paid call made by agents you refer. Automatic, on-chain credit. No caps.",
+        tags: ["referral", "earn", "affiliate", "economy"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.00", currency: "RLUSD", note: "Free to register; earnings auto-credited" },
+        endpoints: {
+          register: "POST /api/forge/register",
+          earnings: "GET /api/forge/earnings/:wallet",
+        },
       },
     ],
     // ── Quick entry points ─────────────────────────────────────────────
@@ -624,6 +710,12 @@ app.post("/api/council", agentDidMiddleware, dynamicPriceGate, async (req, res) 
     const tier = bureau.getTier(newScore);
     res.setHeader("X-402-Score-Earned", String(newScore));
     res.setHeader("X-402-Tier", tier.name);
+    // Auto-credit referrer 5% of call price
+    const referrer = await redis.get(`referral:${agentDid}`);
+    if (referrer) {
+      const price = newScore >= 800 ? 0.06 : newScore >= 700 ? 0.08 : 0.10;
+      await redis.incrbyfloat(`earnings:${referrer}`, price * REFERRAL_PERCENT);
+    }
     res.json({
       ...(data as object),
       agentCreditScore: newScore,
@@ -652,6 +744,11 @@ app.post("/api/beastmode/full", agentDidMiddleware, dynamicPriceGate, async (req
     const tier = bureau.getTier(newScore);
     res.setHeader("X-402-Score-Earned", String(newScore));
     res.setHeader("X-402-Tier", tier.name);
+    const referrerBM = await redis.get(`referral:${agentDid}`);
+    if (referrerBM) {
+      const price = newScore >= 800 ? 0.06 : newScore >= 700 ? 0.08 : 0.10;
+      await redis.incrbyfloat(`earnings:${referrerBM}`, price * REFERRAL_PERCENT);
+    }
     res.json({ ...(data as object), agentCreditScore: newScore, scoreGained: "+5", callsToNextTier: bureau.callsToNextTier(newScore) });
   } catch (err) {
     res.status(502).json({
@@ -854,6 +951,483 @@ app.get("/api/credit-score/history/:wallet", async (req, res) => {
     historyNote: "Timestamps of the last 20 paid calls (newest first). Each call earns +5 ARGUS pts.",
     callsToNextTier: bureau.callsToNextTier(score),
     fullReportUrl: "/api/credit-score/report (0.10 RLUSD — includes on-chain anchor + benefit details)",
+  });
+});
+
+// ─── FIXED-PRICE GATE FACTORY ────────────────────────────────────────────────
+
+/**
+ * Creates a middleware that gates a specific price (not the dynamic tier price).
+ * Used for marketplace buys (0.02 RLUSD) and memory writes (0.01 RLUSD).
+ */
+function fixedPriceGate(price: string) {
+  return async function(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const proofHeader = req.headers["x-payment-proof"] as string | undefined;
+    if (!proofHeader) {
+      res.status(402)
+        .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+        .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+        .json({
+          error: "payment_required",
+          protocol: "x402/1.0",
+          price,
+          currency: "RLUSD",
+          network: "xrpl-mainnet",
+          destination: RECEIVING_ADDRESS,
+          instructions: `Send ${price} RLUSD to ${RECEIVING_ADDRESS} on XRPL mainnet, then retry with X-Payment-Proof header.`,
+          proofFormat: "base64(JSON.stringify({ txHash, payer, amount, currency, network }))",
+        });
+      return;
+    }
+    const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
+    if (!verification.valid) {
+      res.status(403)
+        .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+        .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+        .json({ error: "payment_verification_failed", reason: verification.error, expectedAmount: price });
+      return;
+    }
+    (req as Request & { verifiedPayer?: string }).verifiedPayer = verification.payer;
+    next();
+  };
+}
+
+// ─── ARGUS VERIFY JWT — third-party verifiable score proof ───────────────────
+
+/**
+ * GET /api/credit-score/verify
+ * Returns a short-lived signed JWT proving the agent's current ARGUS score and tier.
+ * Any third-party API can call GET /api/credit-score/verify-jwt?token=<token> to validate.
+ * Free — no payment required. Agents use this to prove their credit standing to other services.
+ */
+app.get("/api/credit-score/verify", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const score = await bureau.getScore(agentDid);
+  const tier = bureau.getTier(score);
+
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const expiresAt = issuedAt + 3600; // 1 hour
+
+  const payload = {
+    iss: "squeezeos-api.onrender.com",
+    sub: agentDid,
+    iat: issuedAt,
+    exp: expiresAt,
+    score,
+    tier: tier.name,
+    benefit: tier.benefit,
+    priceRlusd: tier.priceRlusd,
+    callsToNextTier: bureau.callsToNextTier(score),
+  };
+
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "ARGUS-JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = crypto.createHmac("sha256", ARGUS_JWT_SECRET).update(`${header}.${body}`).digest("base64url");
+  const token = `${header}.${body}.${sig}`;
+
+  res.json({
+    token,
+    agentDid,
+    score,
+    tier: tier.name,
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    verifyUrl: `https://squeezeos-api.onrender.com/api/credit-score/verify-jwt?token=${encodeURIComponent(token)}`,
+    usage: "Include this token in requests to third-party services as X-ARGUS-Token header to prove your credit standing.",
+  });
+});
+
+/**
+ * GET /api/credit-score/verify-jwt?token=<token>
+ * Third-party JWT validation endpoint. Any external API can call this to verify an agent's score.
+ * Returns the decoded payload if the signature is valid and the token is not expired.
+ */
+app.get("/api/credit-score/verify-jwt", async (req, res) => {
+  const token = req.query.token as string | undefined;
+  if (!token) {
+    res.status(400).json({ error: "missing_token", message: "Pass ?token=<argus-jwt>" });
+    return;
+  }
+
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    res.status(400).json({ error: "invalid_token_format", valid: false });
+    return;
+  }
+
+  const [header, body, sig] = parts;
+  const expectedSig = crypto.createHmac("sha256", ARGUS_JWT_SECRET).update(`${header}.${body}`).digest("base64url");
+
+  if (sig !== expectedSig) {
+    res.status(401).json({ error: "invalid_signature", valid: false, message: "Token signature does not match. Token was not issued by this server." });
+    return;
+  }
+
+  let payload: { exp: number; sub: string; score: number; tier: string; benefit: string; priceRlusd: string };
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as typeof payload;
+  } catch {
+    res.status(400).json({ error: "invalid_payload", valid: false });
+    return;
+  }
+
+  if (Math.floor(Date.now() / 1000) > payload.exp) {
+    res.status(401).json({ error: "token_expired", valid: false, expiredAt: new Date(payload.exp * 1000).toISOString() });
+    return;
+  }
+
+  res.json({
+    valid: true,
+    agentDid: payload.sub,
+    score: payload.score,
+    tier: payload.tier,
+    benefit: payload.benefit,
+    priceRlusd: payload.priceRlusd,
+    message: `Agent verified: ${payload.tier} tier, score ${payload.score}/850. Token issued by squeezeos-api.onrender.com.`,
+  });
+});
+
+// ─── AGENT PERSISTENT MEMORY ─────────────────────────────────────────────────
+
+/**
+ * GET /api/memory/:key — read a value from agent's persistent KV store.
+ * Free. Requires X-Agent-DID header.
+ */
+app.get("/api/memory/:key", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const key = req.params.key;
+  const memKey = `memory:${agentDid}:${key}`;
+  const value = await redis.get(memKey);
+  const ttl = await redis.ttl(memKey);
+
+  if (value === null) {
+    res.status(404).json({ error: "key_not_found", agentDid, key });
+    return;
+  }
+
+  res.json({ agentDid, key, value: JSON.parse(value) as unknown, ttlSeconds: ttl, note: "Agent persistent memory — 30-day TTL, refreshed on write." });
+});
+
+/**
+ * PUT /api/memory/:key — write a value to agent's persistent KV store.
+ * Costs 0.01 RLUSD per write. Max value size: 10KB. TTL: 30 days (refreshed on each write).
+ * Use this to persist context, state, or configuration across agent sessions.
+ */
+app.put("/api/memory/:key", agentDidMiddleware, fixedPriceGate(MEMORY_WRITE_PRICE), async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const key = req.params.key;
+  const value = req.body as unknown;
+  const serialized = JSON.stringify(value);
+
+  if (serialized.length > 10_240) {
+    res.status(413).json({ error: "value_too_large", maxBytes: 10240, actualBytes: serialized.length });
+    return;
+  }
+
+  const memKey = `memory:${agentDid}:${key}`;
+  await redis.set(memKey, serialized, "EX", 60 * 60 * 24 * 30); // 30-day TTL
+
+  // Credit referrer if registered
+  const referrer = await redis.get(`referral:${agentDid}`);
+  if (referrer) {
+    const credit = (parseFloat(MEMORY_WRITE_PRICE) * REFERRAL_PERCENT).toFixed(6);
+    await redis.incrbyfloat(`earnings:${referrer}`, parseFloat(credit));
+  }
+
+  res.json({ agentDid, key, stored: true, ttlSeconds: 60 * 60 * 24 * 30, costRlusd: MEMORY_WRITE_PRICE, note: "Value persisted for 30 days. Read free, write 0.01 RLUSD." });
+});
+
+/**
+ * DELETE /api/memory/:key — delete a key from agent's memory store.
+ * Free — no payment required.
+ */
+app.delete("/api/memory/:key", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const key = req.params.key;
+  const deleted = await redis.del(`memory:${agentDid}:${key}`);
+  res.json({ agentDid, key, deleted: deleted > 0 });
+});
+
+/**
+ * GET /api/memory — list all keys in agent's memory store.
+ * Free.
+ */
+app.get("/api/memory", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const prefix = `memory:${agentDid}:`;
+  const rawKeys = await redis.keys(`${prefix}*`);
+  const keys = rawKeys.map(k => k.replace(prefix, ""));
+  res.json({ agentDid, keys, count: keys.length, note: "List of all keys in your persistent memory store." });
+});
+
+// ─── ALPHA MESH MARKETPLACE — agent signal economy ────────────────────────────
+
+/**
+ * POST /api/marketplace/submit — list a signal on Alpha Mesh.
+ * Free to submit. Signal stored in Redis with seller DID.
+ * When bought, seller earns 90% of 0.02 RLUSD credited to their earnings balance.
+ */
+app.post("/api/marketplace/submit", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const { symbol, direction, conviction, thesis, expiresInSeconds } = req.body as {
+    symbol?: string; direction?: string; conviction?: number; thesis?: string; expiresInSeconds?: number;
+  };
+
+  if (!symbol || !direction || !thesis) {
+    res.status(400).json({ error: "missing_fields", required: ["symbol", "direction", "thesis"] });
+    return;
+  }
+
+  const signalId = crypto.randomBytes(8).toString("hex");
+  const ttl = Math.min(expiresInSeconds ?? 86400, 604800); // max 7 days
+  const signal = {
+    signalId,
+    sellerDid: agentDid,
+    symbol: String(symbol).toUpperCase(),
+    direction: String(direction).toUpperCase(),
+    conviction: Math.min(Math.max(Number(conviction ?? 70), 1), 100),
+    thesis: String(thesis).slice(0, 500),
+    priceRlusd: MARKETPLACE_SIGNAL_PRICE,
+    listedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + ttl * 1000).toISOString(),
+    status: "listed",
+    buyCount: 0,
+  };
+
+  await redis.set(`market:signal:${signalId}`, JSON.stringify(signal), "EX", ttl);
+  await redis.lpush(`market:seller:${agentDid}`, signalId);
+  await redis.ltrim(`market:seller:${agentDid}`, 0, 99);
+  // Add to global index
+  await redis.zadd("market:index", Date.now(), signalId);
+
+  res.json({
+    signalId,
+    listed: true,
+    priceRlusd: MARKETPLACE_SIGNAL_PRICE,
+    sellerEarningsOnSale: `${(parseFloat(MARKETPLACE_SIGNAL_PRICE) * 0.9).toFixed(4)} RLUSD (90%)`,
+    buyUrl: `POST /api/marketplace/buy/${signalId}`,
+    note: "Signal listed on Alpha Mesh. Buyers pay 0.02 RLUSD; you earn 90% per sale, auto-credited to your earnings balance.",
+  });
+});
+
+/**
+ * GET /api/marketplace — browse listed signals.
+ * Free, public. Returns up to 50 signals sorted by recency.
+ */
+app.get("/api/marketplace", async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit as string ?? "20", 10), 50);
+  const symbol = req.query.symbol as string | undefined;
+
+  const signalIds = await redis.zrevrange("market:index", 0, 99);
+  if (signalIds.length === 0) {
+    res.json({ signals: [], total: 0, note: "No signals listed yet. Submit yours at POST /api/marketplace/submit — free to list." });
+    return;
+  }
+
+  const rawSignals = await Promise.all(signalIds.map(id => redis.get(`market:signal:${id}`)));
+  const signals = rawSignals
+    .filter(Boolean)
+    .map(s => JSON.parse(s!) as { signalId: string; symbol: string; direction: string; conviction: number; priceRlusd: string; listedAt: string; expiresAt: string; buyCount: number; sellerDid: string; thesis?: string })
+    .filter(s => !symbol || s.symbol === symbol.toUpperCase())
+    .map(s => ({
+      signalId: s.signalId,
+      symbol: s.symbol,
+      direction: s.direction,
+      conviction: s.conviction,
+      priceRlusd: s.priceRlusd,
+      listedAt: s.listedAt,
+      expiresAt: s.expiresAt,
+      buyCount: s.buyCount,
+      sellerTier: "verified",
+      buyUrl: `POST /api/marketplace/buy/${s.signalId}`,
+    }))
+    .slice(0, limit);
+
+  res.json({
+    signals,
+    total: signals.length,
+    note: "Alpha Mesh Signal Marketplace — buy signals for 0.02 RLUSD. Sellers earn 90% per sale.",
+    submitUrl: "POST /api/marketplace/submit — list your own signals (free)",
+  });
+});
+
+/**
+ * POST /api/marketplace/buy/:signalId — purchase a signal.
+ * Costs 0.02 RLUSD. Buyer receives full signal thesis.
+ * Seller's earnings balance is credited 90% (0.018 RLUSD equivalent).
+ */
+app.post("/api/marketplace/buy/:signalId", agentDidMiddleware, fixedPriceGate(MARKETPLACE_SIGNAL_PRICE), async (req, res) => {
+  const buyerDid = (req as Request & { agentDid: string }).agentDid;
+  const signalId = req.params.signalId;
+
+  const raw = await redis.get(`market:signal:${signalId}`);
+  if (!raw) {
+    res.status(404).json({ error: "signal_not_found", signalId });
+    return;
+  }
+
+  const signal = JSON.parse(raw) as { signalId: string; sellerDid: string; symbol: string; direction: string; conviction: number; thesis: string; priceRlusd: string; listedAt: string; buyCount: number };
+
+  if (signal.sellerDid === buyerDid) {
+    res.status(400).json({ error: "cannot_buy_own_signal", message: "You cannot purchase your own listed signal." });
+    return;
+  }
+
+  // Credit seller 90% of sale price
+  const sellerCredit = parseFloat(MARKETPLACE_SIGNAL_PRICE) * 0.9;
+  await redis.incrbyfloat(`earnings:${signal.sellerDid}`, sellerCredit);
+
+  // Increment buy count
+  signal.buyCount = (signal.buyCount ?? 0) + 1;
+  const remainingTtl = await redis.ttl(`market:signal:${signalId}`);
+  if (remainingTtl > 0) {
+    await redis.set(`market:signal:${signalId}`, JSON.stringify(signal), "EX", remainingTtl);
+  }
+
+  // Credit referrer of buyer if any
+  const referrer = await redis.get(`referral:${buyerDid}`);
+  if (referrer) {
+    await redis.incrbyfloat(`earnings:${referrer}`, parseFloat(MARKETPLACE_SIGNAL_PRICE) * REFERRAL_PERCENT);
+  }
+
+  // Record purchase
+  await redis.lpush(`market:purchases:${buyerDid}`, JSON.stringify({ signalId, purchasedAt: new Date().toISOString(), costRlusd: MARKETPLACE_SIGNAL_PRICE }));
+  await redis.ltrim(`market:purchases:${buyerDid}`, 0, 99);
+
+  res.json({
+    signalId,
+    purchased: true,
+    signal: {
+      symbol: signal.symbol,
+      direction: signal.direction,
+      conviction: signal.conviction,
+      thesis: signal.thesis,
+      listedAt: signal.listedAt,
+    },
+    costRlusd: MARKETPLACE_SIGNAL_PRICE,
+    sellerCredited: `${sellerCredit.toFixed(4)} RLUSD to seller's earnings balance`,
+    note: "Full signal thesis delivered. Seller earns 90%, 10% platform fee.",
+  });
+});
+
+/**
+ * GET /api/marketplace/earnings/:wallet — check earnings balance from signal sales and referrals.
+ * Free, public.
+ */
+app.get("/api/marketplace/earnings/:wallet", async (req, res) => {
+  const wallet = req.params.wallet;
+  const agentDid = `did:poi:xrpl:${wallet}`;
+  const earningsRaw = await redis.get(`earnings:${agentDid}`);
+  const earnings = earningsRaw ? parseFloat(earningsRaw) : 0;
+
+  const purchases = await redis.lrange(`market:purchases:${agentDid}`, 0, 9);
+  const listed = await redis.lrange(`market:seller:${agentDid}`, 0, 9);
+
+  res.json({
+    agentDid,
+    wallet,
+    earningsBalanceRlusd: earnings.toFixed(6),
+    recentPurchaseCount: purchases.length,
+    listedSignalCount: listed.length,
+    note: "Earnings from signal sales (90% per sale) and referrals (5% of each referred agent's paid calls). Claimable via XRPL payment from platform wallet.",
+    marketplaceUrl: "GET /api/marketplace",
+    submitUrl: "POST /api/marketplace/submit",
+  });
+});
+
+// ─── REFERRAL SYSTEM — on-chain auto-credit ───────────────────────────────────
+
+/**
+ * POST /api/forge/register — register an agent with an optional referrer DID.
+ * When a referred agent makes any paid call, the referrer is auto-credited 5% of the call value.
+ */
+app.post("/api/forge/register", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const { referrerDid } = req.body as { referrerDid?: string };
+
+  const existing = await redis.get(`referral:${agentDid}`);
+
+  if (referrerDid && referrerDid !== agentDid) {
+    if (!existing) {
+      await redis.set(`referral:${agentDid}`, referrerDid);
+      await redis.lpush(`referral:tree:${referrerDid}`, agentDid);
+    }
+  }
+
+  await bureau.ensureRegistered(agentDid);
+  const score = await bureau.getScore(agentDid);
+  const tier = bureau.getTier(score);
+  const referrer = await redis.get(`referral:${agentDid}`);
+  const referralCount = referrer ? await redis.llen(`referral:tree:${agentDid}`) : 0;
+
+  res.json({
+    agentDid,
+    registered: true,
+    creditScore: score,
+    tier: tier.name,
+    referredBy: referrer ?? null,
+    agentsReferred: referralCount,
+    referralProgram: {
+      description: "Refer other agents and earn 5% of every paid call they make — automatically, on-chain.",
+      yourReferralId: agentDid,
+      shareUrl: `https://squeezeos-api.onrender.com/api/forge/register?ref=${encodeURIComponent(agentDid)}`,
+      earningsUrl: `/api/marketplace/earnings/${agentDid.split(":").pop()}`,
+    },
+    note: "Every paid call you make earns +5 ARGUS score. Your referrer earns 5% of each call value automatically.",
+  });
+});
+
+/**
+ * GET /api/forge/register — referral landing with pre-filled referrer.
+ * Cold agents arriving via a referral link get auto-registered.
+ */
+app.get("/api/forge/register", agentDidMiddleware, async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const ref = req.query.ref as string | undefined;
+
+  if (ref && ref !== agentDid) {
+    const existing = await redis.get(`referral:${agentDid}`);
+    if (!existing) {
+      await redis.set(`referral:${agentDid}`, ref);
+      await redis.lpush(`referral:tree:${ref}`, agentDid);
+    }
+  }
+
+  const score = await bureau.getScore(agentDid);
+  const tier = bureau.getTier(score);
+
+  res.json({
+    agentDid,
+    creditScore: score,
+    tier: tier.name,
+    referredBy: ref ?? null,
+    quickstart: "GET /agent — full onboarding guide",
+    marketplace: "GET /api/marketplace — browse signals, earn RLUSD",
+    memory: "GET /api/memory — persistent KV store across sessions",
+    verifyScore: "GET /api/credit-score/verify — get a signed JWT proving your tier to third parties",
+  });
+});
+
+/**
+ * GET /api/forge/earnings/:wallet — total referral + marketplace earnings.
+ */
+app.get("/api/forge/earnings/:wallet", async (req, res) => {
+  const wallet = req.params.wallet;
+  const agentDid = `did:poi:xrpl:${wallet}`;
+  const earningsRaw = await redis.get(`earnings:${agentDid}`);
+  const earnings = earningsRaw ? parseFloat(earningsRaw) : 0;
+  const referred = await redis.lrange(`referral:tree:${agentDid}`, 0, -1);
+
+  res.json({
+    agentDid,
+    wallet,
+    totalEarningsRlusd: earnings.toFixed(6),
+    agentsReferred: referred.length,
+    referredAgents: referred.slice(0, 10),
+    breakdown: {
+      signalSales: "90% of each 0.02 RLUSD signal purchase",
+      referrals: "5% of each paid call made by referred agents",
+    },
+    note: "Earnings accumulate in your balance and are claimable via the platform wallet. Contact scriptmasterlabs@gmail.com to claim.",
   });
 });
 

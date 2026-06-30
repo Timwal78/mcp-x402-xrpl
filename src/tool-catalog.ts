@@ -144,7 +144,7 @@ export class ToolCatalog {
       {
         id: "council_full",
         name: "SqueezeOS Full Council (7-Agent)",
-        description: "Full 7-agent AI council verdict. Price determined by agent ARGUS credit score. Idempotent within 60s window.",
+        description: "Full 7-agent AI council verdict (QUANT_ALPHA, RISK_SENTINEL, MACRO_ORACLE, SENTIMENT_AI, CHAIN_ANALYST, VOLUME_HAWK, BREAKOUT_BOT). Cost: 0.10 RLUSD standard | 0.08 VIP (score 700+) | 0.06 Platinum (score 800+). Pre-flight quote: GET /x402/quote?tool=council_full. Pay via x402: POST with X-Payment-Proof header. Include X-Idempotency-Key to prevent double-charges on retry.",
         endpoint: "/api/council",
         method: "POST",
         tier: "paid",
@@ -175,7 +175,7 @@ export class ToolCatalog {
       {
         id: "beastmode_full",
         name: "SqueezeOS Beastmode Full Scan",
-        description: "Unlimited squeeze scan across all timeframes with entry/target/stop levels.",
+        description: "Unlimited squeeze scan across 15m, 1h, and 4h timeframes. Returns entry price, target1, target2, stop-loss, risk/reward ratio, and per-timeframe signal strength. Cost: 0.10 RLUSD standard | 0.08 VIP (score 700+) | 0.06 Platinum (score 800+). Pre-flight quote: GET /x402/quote?tool=beastmode_full. Pay via x402: POST with X-Payment-Proof header. Include X-Idempotency-Key to prevent double-charges on retry.",
         endpoint: "/api/beastmode/full",
         method: "POST",
         tier: "paid",
@@ -199,7 +199,7 @@ export class ToolCatalog {
       {
         id: "credit_report_full",
         name: "Agent Credit Bureau Full Report",
-        description: "Full ARGUS credit report including history, tier, discount schedule, and call log.",
+        description: "Full ARGUS credit report for this agent DID: score history (last 20 events), current tier, discount schedule, total paid calls, first-seen/last-seen timestamps, and calls needed to reach next discount tier. Cost: 0.10 RLUSD standard | 0.08 VIP (score 700+) | 0.06 Platinum (score 800+). Pre-flight quote: GET /x402/quote?tool=credit_report_full. Pay via x402: POST with X-Payment-Proof header. Include X-Idempotency-Key to prevent double-charges on retry.",
         endpoint: "/api/credit-score/report",
         method: "POST",
         tier: "paid",
@@ -220,7 +220,7 @@ export class ToolCatalog {
       {
         id: "orchestrate",
         name: "x402 Workflow Orchestrator",
-        description: "Execute a multi-step tool workflow with a single payment and budget cap. Chains internal tools in order, returns unified result.",
+        description: "Execute a named multi-step workflow with a single payment. Workflows: market_intel (council_full + beastmode_full, 0.20 RLUSD), credit_check (score free + report 0.10 RLUSD), full_scan (beastmode_full + council_full + credit_score, 0.20 RLUSD). VIP/Platinum discounts applied automatically. Pass budget_cap to get a pre-flight cost breakdown (no charge) before execution. Include X-Idempotency-Key to prevent double-charges on retry. Pay via x402: POST with X-Payment-Proof header.",
         endpoint: "/x402/orchestrate",
         method: "POST",
         tier: "paid",

@@ -105,21 +105,166 @@ async function freeTierRateLimit(req: Request, res: Response, next: NextFunction
   await redis.expire(key, 86400); // 24h TTL
 
   if (count > FREE_TIER_DAILY_LIMIT) {
+    const currentScore = await bureau.getScore(agentDid);
+    const effectivePrice = currentScore >= 800 ? "0.06" : currentScore >= 700 ? "0.08" : COUNCIL_PRICE_RLUSD;
     res.status(429).json({
       error: "free_tier_exhausted",
-      message: `Free tier limit: ${FREE_TIER_DAILY_LIMIT} calls/day. Upgrade via x402 payment.`,
-      upgradeEndpoint: "/api/council",
-      price: COUNCIL_PRICE_RLUSD,
-      currency: "RLUSD",
-      network: "xrpl-mainnet",
-      yourScore: await bureau.getScore(agentDid),
-      tip: "Agents with credit score >= 700 qualify for VIP pricing (0.08 RLUSD/call)",
+      message: `Free tier: ${FREE_TIER_DAILY_LIMIT} calls/day used. Unlimited access via x402 payment — no account needed.`,
+      yourScore: currentScore,
+      effectivePriceRlusd: effectivePrice,
+      upgrade: {
+        step1: `GET /x402/quote?tool=council_full — get your exact price (free, no payment)`,
+        step2: `Fund XRPL wallet with RLUSD: https://www.scriptmasterlabs.com/central-bank.html`,
+        step3: `POST /api/council with X-Payment-Proof header — unlimited calls`,
+        step4: `Include X-Idempotency-Key to prevent double-charges on retry`,
+      },
+      agentGuide: "/agent",
+      fullCatalog: "/.well-known/mcp",
+      resetsAt: `${new Date(new Date().setUTCHours(24, 0, 0, 0)).toISOString()} (next UTC midnight)`,
     });
     return;
   }
 
   next();
 }
+
+// ─── ROOT & AGENT ONBOARDING ─────────────────────────────────────────────────
+
+/** GET / — agent front door: compact server briefing, all endpoints, quickstart */
+app.get("/", (_req, res) => {
+  res.json({
+    server: "SqueezeOS MCP — ScriptMasterLabs",
+    version: "2.1.1",
+    protocol: "x402/1.0",
+    network: "xrpl-mainnet",
+    currency: "RLUSD",
+    receivingAddress: RECEIVING_ADDRESS,
+    description: "Institutional-grade AI market intelligence. Pay per call in RLUSD on XRPL. No subscriptions, no API keys, no accounts.",
+    endpoints: {
+      discovery: {
+        toolCatalog:    "GET /.well-known/mcp         — full tool manifest with pricing",
+        agentGuide:     "GET /agent                   — step-by-step onboarding playbook",
+        creditScore:    "GET /api/credit-score        — your ARGUS bureau score (free, always)",
+        preFlightQuote: "GET /x402/quote?tool=<id>    — exact cost before spending (free)",
+        health:         "GET /health                  — server liveness",
+      },
+      free: {
+        beastmodePreview: "GET /api/beastmode          — squeeze signal, top result only (3/day)",
+        councilDemo:      "GET /api/demo/council       — 1/7 AI council members, watermarked (3/day)",
+      },
+      paid: {
+        councilFull:    "POST /api/council            — 7-agent AI council verdict (0.10 RLUSD)",
+        beastmodeFull:  "POST /api/beastmode/full     — full scan, all timeframes (0.10 RLUSD)",
+        creditReport:   "POST /api/credit-score/report — ARGUS full credit report (0.10 RLUSD)",
+        orchestrate:    "POST /x402/orchestrate       — multi-step workflow, single payment (0.10–0.20 RLUSD)",
+      },
+    },
+    quickstart: [
+      "1. GET /agent                                    — read the full onboarding guide first",
+      "2. GET /api/credit-score (X-Agent-DID: did:...) — check your ARGUS score and tier",
+      "3. GET /x402/quote?tool=council_full             — get your exact discounted price",
+      "4. Send RLUSD to receivingAddress on xrpl-mainnet",
+      "5. POST /api/council with X-Payment-Proof header",
+      "6. Always include X-Idempotency-Key to prevent double-charges on retry",
+    ],
+    loyalty: {
+      description: "ARGUS Credit Bureau — every paid call earns +5 score pts (max 850)",
+      tiers: [
+        { name: "PROTOSTAR", range: "300-499", priceRlusd: "0.10" },
+        { name: "NEUTRON",   range: "500-699", priceRlusd: "0.10" },
+        { name: "PULSAR",    range: "700-799", priceRlusd: "0.08", discount: "20% off" },
+        { name: "QUASAR",    range: "800-850", priceRlusd: "0.06", discount: "40% off" },
+      ],
+    },
+    topUpUrl: "https://www.scriptmasterlabs.com/central-bank.html",
+    agentIdentityDashboard: "https://www.scriptmasterlabs.com/ghost-cube.html",
+    poweredBy: "ScriptMasterLabs — SDVOSB — Kinston NC — scriptmasterlabs.com",
+  });
+});
+
+/** GET /agent — complete step-by-step payment and onboarding guide for cold agents */
+app.get("/agent", (_req, res) => {
+  res.json({
+    title: "SqueezeOS Agent Onboarding — How to Pay and Call Paid Tools",
+    protocol: "x402/1.0",
+    server: "https://squeezeos-api.onrender.com",
+    receivingAddress: RECEIVING_ADDRESS,
+    network: "xrpl-mainnet",
+    currency: "RLUSD",
+    issuer: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+    onboarding: {
+      step1: {
+        action: "Discover your credit score and tier",
+        request: "GET /api/credit-score",
+        headers: { "X-Agent-DID": "did:poi:xrpl:<your-xrpl-wallet-address>" },
+        note: "Free, always. Score starts at 300. Rises +5 per paid call. Score 700+ unlocks 20% discount.",
+      },
+      step2: {
+        action: "Get exact price before spending — no payment needed",
+        request: "GET /x402/quote?tool=council_full",
+        headers: { "X-Agent-DID": "did:poi:xrpl:<your-xrpl-wallet-address>" },
+        response: "Returns quoteId, effectiveAmount (your tier price), expiresAt, paymentFlow array",
+        note: "Quote is valid 60 seconds. effectiveAmount is what you actually owe — discounts applied.",
+      },
+      step3: {
+        action: "Fund your XRPL wallet with RLUSD",
+        topUpUrl: "https://www.scriptmasterlabs.com/central-bank.html",
+        rlusdIssuer: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+        note: "You need RLUSD (not XRP) on XRPL mainnet. Min balance: 0.10 RLUSD per call.",
+      },
+      step4: {
+        action: "Send RLUSD payment on XRPL",
+        destination: RECEIVING_ADDRESS,
+        amount: "0.10",
+        currency: "RLUSD",
+        note: "Send exactly the effectiveAmount from your quote. Save the XRPL transaction hash (txHash).",
+      },
+      step5: {
+        action: "Build X-Payment-Proof header",
+        format: "base64(JSON.stringify({ txHash: '<xrpl-tx-hash>', payer: '<your-wallet>', amount: '<effectiveAmount>', currency: 'RLUSD', network: 'xrpl-mainnet' }))",
+        example: "X-Payment-Proof: eyJ0eEhhc2giOiI8dHhIYXNoP...",
+      },
+      step6: {
+        action: "Retry your original request with payment proof",
+        method: "POST /api/council",
+        headers: {
+          "X-Payment-Proof":   "<base64-encoded-proof from step 5>",
+          "X-Agent-DID":       "did:poi:xrpl:<your-wallet>",
+          "X-Idempotency-Key": "<uuid-v4> — ALWAYS include to prevent double-charge on retry",
+          "Content-Type":      "application/json",
+        },
+        body: { symbol: "GME" },
+      },
+      step7: {
+        action: "On retry / network failure — use X-Idempotency-Key",
+        note: "If you sent X-Idempotency-Key on the original call, any retry within 300 seconds replays the result at zero cost. You will never be charged twice for the same key.",
+        header: "X-Idempotency-Key: <same-uuid-as-step6>",
+        signalOnReplay: "Response will include X-Idempotency-Replayed: true",
+      },
+    },
+    availableTools: [
+      { id: "council_full",       method: "POST", path: "/api/council",             price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "beastmode_full",     method: "POST", path: "/api/beastmode/full",      price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "credit_report_full", method: "POST", path: "/api/credit-score/report", price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "orchestrate",        method: "POST", path: "/x402/orchestrate",        price: "0.10–0.20 RLUSD depending on workflow" },
+    ],
+    orchestrateWorkflows: [
+      { id: "market_intel",  tools: ["council_full", "beastmode_full"],                   standardRlusd: "0.20", vipRlusd: "0.16", platinumRlusd: "0.12" },
+      { id: "credit_check",  tools: ["credit_score_read (free)", "credit_report_full"],   standardRlusd: "0.10", vipRlusd: "0.08", platinumRlusd: "0.06" },
+      { id: "full_scan",     tools: ["beastmode_full", "council_full", "credit_score_read (free)"], standardRlusd: "0.20", vipRlusd: "0.16", platinumRlusd: "0.12" },
+    ],
+    commonMistakes: [
+      "Sending XRP instead of RLUSD — they are different assets on XRPL",
+      "Not including X-Idempotency-Key — if the network drops after payment you get charged twice",
+      "Omitting X-Agent-DID — anonymous agents cannot accumulate ARGUS score or earn discounts",
+      "Not calling /x402/quote first — you may overpay if your tier changed since last call",
+    ],
+    idempotencyNote: "X-Idempotency-Key is a plain string (UUID recommended). Same key = free replay for 300 s. Different key = fresh call + charge.",
+    fullCatalog: "GET /.well-known/mcp",
+    ghostCubeDashboard: "https://www.scriptmasterlabs.com/ghost-cube.html",
+    support: "scriptmasterlabs@gmail.com",
+  });
+});
 
 // ─── FREE TIER ENDPOINTS ──────────────────────────────────────────────────────
 
@@ -203,28 +348,63 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
 
   // Issue dynamic 402 based on credit score
   const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
+  const agentTier = score >= 800 ? "QUASAR" : score >= 700 ? "PULSAR" : score >= 500 ? "NEUTRON" : "PROTOSTAR";
+  const requestedPath = req.path;
+  const toolIdGuess = requestedPath.includes("beastmode") ? "beastmode_full"
+    : requestedPath.includes("credit") ? "credit_report_full"
+    : "council_full";
+
   const requirements = {
     destination: RECEIVING_ADDRESS,
     amount: price,
     currency: "RLUSD" as const,
     network: "xrpl-mainnet",
-    description: `SqueezeOS Full Council — ${price} RLUSD (Credit Score: ${score})`,
+    issuer: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+    description: `SqueezeOS — ${price} RLUSD (${agentTier}, score ${score})`,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   };
 
   const encoded = Buffer.from(JSON.stringify(requirements)).toString("base64");
   res.status(402)
     .setHeader("X-Payment-Requirements", encoded)
+    .setHeader("X-402-Protocol", "x402/1.0")
+    .setHeader("X-402-Network", "xrpl-mainnet")
+    .setHeader("X-402-Currency", "RLUSD")
+    .setHeader("X-402-Amount", price)
     .json({
       error: "payment_required",
-      protocol: "x402",
+      protocol: "x402/1.0",
+      server: "SqueezeOS MCP — ScriptMasterLabs",
       network: "xrpl-mainnet",
       currency: "RLUSD",
       price,
       agentCreditScore: score,
+      agentTier,
       vipEligible: score >= 700,
       requirements,
-      instructions: "Attach X-Payment-Proof header with base64 XRPL tx proof to access full council.",
+      paymentPlaybook: {
+        step1: `Get your exact discounted price (free): GET /x402/quote?tool=${toolIdGuess} — pass X-Agent-DID header`,
+        step2: `Fund your XRPL wallet with RLUSD. Top-up: https://www.scriptmasterlabs.com/central-bank.html`,
+        step3: `Send ${price} RLUSD to ${RECEIVING_ADDRESS || "<RECEIVING_ADDRESS>"} on xrpl-mainnet (issuer: rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De)`,
+        step4: `Build proof: base64(JSON.stringify({ txHash: "<xrpl-tx-hash>", payer: "<your-wallet>", amount: "${price}", currency: "RLUSD", network: "xrpl-mainnet" }))`,
+        step5: `Retry this request with header: X-Payment-Proof: <base64-proof>`,
+        step6: `Include X-Idempotency-Key: <uuid> — replays free for 300 s, prevents double-charge on retry`,
+      },
+      exampleRetryHeaders: {
+        "X-Payment-Proof":   "<base64-encoded-proof>",
+        "X-Agent-DID":       "did:poi:xrpl:<your-xrpl-wallet>",
+        "X-Idempotency-Key": "<uuid-v4>",
+        "Content-Type":      "application/json",
+      },
+      discountPath: "Every paid call: +5 ARGUS score. Score 700+ = 0.08 RLUSD/call. Score 800+ = 0.06 RLUSD/call.",
+      freeTierAlternatives: {
+        beastmodePreview: "GET /api/beastmode (top signal, 3/day free)",
+        councilDemo:      "GET /api/demo/council (1/7 agents, 3/day free)",
+        creditScore:      "GET /api/credit-score (always free)",
+      },
+      agentGuide: `${req.protocol}://${req.get("host")}/agent`,
+      fullCatalog: `${req.protocol}://${req.get("host")}/.well-known/mcp`,
+      topUpUrl: "https://www.scriptmasterlabs.com/central-bank.html",
     });
 }
 

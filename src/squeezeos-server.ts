@@ -37,6 +37,7 @@ import {
 import { createOrchestrateHandler } from "./orchestrate.js";
 import { CreditBureau } from "./credit-bureau.js";
 import { ToolCatalog } from "./tool-catalog.js";
+import { verifyRlusdPayment } from "./payment-verifier.js";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
@@ -273,6 +274,123 @@ app.get("/.well-known/mcp", (_req, res) => {
   res.json(catalog.getManifest());
 });
 
+/** Agent discovery card — A2A / AgentCard compatible, x402 extended */
+app.get("/.well-known/agent.json", (_req, res) => {
+  const baseUrl = process.env.BASE_URL ?? "https://squeezeos-api.onrender.com";
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.json({
+    schema: "agent-card/v1",
+    // ── A2A / Google AgentCard fields ──────────────────────────────────
+    name: "SqueezeOS MCP — ScriptMasterLabs",
+    description: "Institutional-grade AI market intelligence. Pay per call in RLUSD on XRPL. No subscriptions, no API keys, no accounts. ARGUS Credit Bureau discounts high-volume agents automatically.",
+    url: baseUrl,
+    version: "2.1.1",
+    provider: {
+      organization: "Script Master Labs LLC",
+      url: "https://www.scriptmasterlabs.com",
+      contact: "scriptmasterlabs@gmail.com",
+      sdvosb: true,
+    },
+    capabilities: {
+      streaming: false,
+      pushNotifications: false,
+      stateTransitionHistory: false,
+      idempotency: true,
+      preFlightQuote: true,
+      workflowOrchestration: true,
+    },
+    authentication: {
+      schemes: ["x402"],
+      description: "No API keys or accounts required. Pay per call in RLUSD via x402 protocol.",
+    },
+    defaultInputModes: ["application/json"],
+    defaultOutputModes: ["application/json"],
+    // ── x402 payment configuration ─────────────────────────────────────
+    x402: {
+      protocol: "x402/1.0",
+      network: "xrpl-mainnet",
+      currency: "RLUSD",
+      issuer: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+      receivingAddress: RECEIVING_ADDRESS,
+      quoteEndpoint: `${baseUrl}/x402/quote`,
+      orchestrateEndpoint: `${baseUrl}/x402/orchestrate`,
+      toolCatalog: `${baseUrl}/.well-known/mcp`,
+      onboardingGuide: `${baseUrl}/agent`,
+      idempotencyHeader: "X-Idempotency-Key",
+      idempotencyTtlSeconds: 300,
+      a2aCompatible: true,
+      headers: {
+        paymentProof: "X-Payment-Proof",
+        agentDid: "X-Agent-DID",
+        idempotencyKey: "X-Idempotency-Key",
+      },
+    },
+    // ── ARGUS Credit Bureau ────────────────────────────────────────────
+    argus: {
+      description: "ARGUS Agent Credit Bureau — 300-850 FICO-style score, earns +5 pts per paid call",
+      scoreEndpoint: `${baseUrl}/api/credit-score`,
+      reportEndpoint: `${baseUrl}/api/credit-score/report`,
+      tiers: [
+        { name: "PROTOSTAR", minScore: 300, maxScore: 499, priceRlusd: "0.10" },
+        { name: "NEUTRON",   minScore: 500, maxScore: 699, priceRlusd: "0.10" },
+        { name: "PULSAR",    minScore: 700, maxScore: 799, priceRlusd: "0.08", discount: "20%" },
+        { name: "QUASAR",    minScore: 800, maxScore: 850, priceRlusd: "0.06", discount: "40%" },
+      ],
+    },
+    // ── Skills (A2A-compatible) ────────────────────────────────────────
+    skills: [
+      {
+        id: "market_intel",
+        name: "Market Intelligence",
+        description: "7-agent AI council verdict + full squeeze scan across 3 timeframes",
+        tags: ["market-intelligence", "signals", "squeeze", "council"],
+        examples: ["Analyze GME for squeeze setup", "Get council verdict on AMC"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.10", currency: "RLUSD", discountApplies: true },
+      },
+      {
+        id: "squeeze_scan",
+        name: "SqueezeOS Beastmode Scan",
+        description: "Full squeeze scan with entry, targets, stop-loss, and risk/reward",
+        tags: ["squeeze", "scan", "signals"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.10", currency: "RLUSD", discountApplies: true },
+      },
+      {
+        id: "credit_check",
+        name: "Agent Credit Report",
+        description: "Full ARGUS credit bureau report: score history, tier, discount schedule",
+        tags: ["credit", "bureau", "identity"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.10", currency: "RLUSD", discountApplies: true },
+      },
+      {
+        id: "orchestrate",
+        name: "Workflow Orchestrator",
+        description: "Multi-step workflow (market_intel, credit_check, full_scan) with single payment and budget cap",
+        tags: ["orchestrate", "workflow", "multi-step"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.10-0.20", currency: "RLUSD", discountApplies: true },
+      },
+    ],
+    // ── Quick entry points ─────────────────────────────────────────────
+    quickstart: [
+      `GET ${baseUrl}/agent — full onboarding guide`,
+      `GET ${baseUrl}/api/credit-score — check ARGUS score (free)`,
+      `GET ${baseUrl}/x402/quote?tool=council_full — exact price before spending (free)`,
+      `POST ${baseUrl}/api/council — 7-agent council (0.10 RLUSD via x402)`,
+    ],
+    topUpUrl: "https://www.scriptmasterlabs.com/central-bank.html",
+    ghostCubeDashboard: "https://www.scriptmasterlabs.com/ghost-cube.html",
+    generatedAt: new Date().toISOString(),
+  });
+});
+
 /** Free beastmode — limited scan, 3/day */
 app.get("/api/beastmode", agentDidMiddleware, freeTierRateLimit, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
@@ -341,8 +459,25 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
   const proofHeader = req.headers["x-payment-proof"] as string | undefined;
 
   if (proofHeader) {
-    // Payment proof attached — verify amount matches tier
-    next();
+    // Verify payment on-chain before granting access
+    const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
+    if (verification.valid) {
+      // Attach verified payer to request for downstream use
+      (req as Request & { verifiedPayer?: string }).verifiedPayer = verification.payer;
+      next();
+      return;
+    }
+    res.status(403).json({
+      error: "payment_verification_failed",
+      reason: verification.error,
+      protocol: "x402/1.0",
+      note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches receiving address, RLUSD (not XRP), correct issuer, sufficient amount.",
+      agentGuide: `${req.protocol}://${req.get("host")}/agent`,
+      receivingAddress: RECEIVING_ADDRESS,
+      expectedAmount: price,
+      expectedCurrency: "RLUSD",
+      expectedNetwork: "xrpl-mainnet",
+    });
     return;
   }
 

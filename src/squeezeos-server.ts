@@ -46,6 +46,19 @@ const RECEIVING_ADDRESS = process.env.XRPL_RECEIVING_ADDRESS ?? "";
 const WALLET_SEED = process.env.XRPL_WALLET_SEED ?? "";
 const NETWORK = (process.env.XRPL_NETWORK ?? "xrpl-mainnet") as "xrpl-mainnet" | "xrpl-testnet";
 
+/**
+ * URL of the upstream SqueezeOS Python intelligence server.
+ * REQUIRED for paid endpoints — if unset, paid calls return 503.
+ * Example: https://squeezeos-api.onrender.com
+ */
+const SQUEEZEOS_UPSTREAM_URL = (process.env.SQUEEZEOS_UPSTREAM_URL ?? "").replace(/\/$/, "");
+
+/**
+ * Optional shared secret forwarded as X-Internal-Secret to the upstream.
+ * Set this in both services to prevent unauthenticated direct hits on the Python backend.
+ */
+const SQUEEZEOS_INTERNAL_SECRET = process.env.SQUEEZEOS_INTERNAL_SECRET ?? "";
+
 /** 0.10 RLUSD per paid call */
 const COUNCIL_PRICE_RLUSD = "0.10";
 /** Volume discount threshold — agents with score >= 700 pay 0.08 */
@@ -456,6 +469,42 @@ app.get("/api/credit-score", agentDidMiddleware, async (req, res) => {
   });
 });
 
+// ─── UPSTREAM PROXY ───────────────────────────────────────────────────────────
+
+/**
+ * Forward a request to the upstream SqueezeOS Python backend.
+ * Throws if SQUEEZEOS_UPSTREAM_URL is not configured or the upstream returns an error.
+ * Never returns mock data — callers must surface the error to the agent.
+ */
+async function callUpstream(
+  method: "GET" | "POST",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<unknown> {
+  if (!SQUEEZEOS_UPSTREAM_URL) {
+    throw new Error("SQUEEZEOS_UPSTREAM_URL env var is not set — upstream SqueezeOS backend is not configured");
+  }
+
+  const url = `${SQUEEZEOS_UPSTREAM_URL}${path}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (SQUEEZEOS_INTERNAL_SECRET) {
+    headers["X-Internal-Secret"] = SQUEEZEOS_INTERNAL_SECRET;
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "(unreadable body)");
+    throw new Error(`Upstream ${method} ${path} → HTTP ${res.status}: ${text}`);
+  }
+
+  return res.json() as Promise<unknown>;
+}
+
 // ─── PAID TIER ENDPOINTS ──────────────────────────────────────────────────────
 
 /** Dynamic price gate — checks agent credit score, applies VIP if eligible */
@@ -560,54 +609,50 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
 app.post("/api/council", agentDidMiddleware, dynamicPriceGate, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
 
-  // Increment credit score on successful paid call (+5 pts)
-  const newScore = await bureau.recordPaidCall(agentDid);
+  if (!SQUEEZEOS_UPSTREAM_URL) {
+    res.status(503).json({
+      error: "upstream_not_configured",
+      message: "SQUEEZEOS_UPSTREAM_URL is not set on this server. Contact the operator.",
+    });
+    return;
+  }
 
-  res.json({
-    tool: "council",
-    tier: "paid",
-    council: [
-      { agent: "QUANT_ALPHA", signal: "BUY", confidence: 0.82, reasoning: "RSI oversold + MACD crossover on 4h" },
-      { agent: "RISK_SENTINEL", signal: "HOLD", confidence: 0.71, reasoning: "Liquidity thin above $0.58 — gap risk" },
-      { agent: "MACRO_ORACLE", signal: "BUY", confidence: 0.76, reasoning: "XRP/USD correlation with DXY breakdown" },
-      { agent: "SENTIMENT_AI", signal: "BUY", confidence: 0.88, reasoning: "Social velocity +340% — institutional mentions rising" },
-      { agent: "CHAIN_ANALYST", signal: "BUY", confidence: 0.79, reasoning: "Exchange outflows 2.1M XRP last 4h — accumulation" },
-      { agent: "VOLUME_HAWK", signal: "HOLD", confidence: 0.65, reasoning: "Volume declining into resistance — confirm break" },
-      { agent: "BREAKOUT_BOT", signal: "BUY", confidence: 0.84, reasoning: "Price coiling above 20EMA — breakout probability 84%" },
-    ],
-    consensus: "BUY (5/7)",
-    agentCreditScore: newScore,
-    scoreGained: "+5",
-    callsToVip: bureau.callsToNextTier(newScore),
-    poweredBy: "SqueezeOS x ScriptMasterLabs",
-  });
+  try {
+    const data = await callUpstream("POST", "/api/council", req.body as Record<string, unknown>);
+    const newScore = await bureau.recordPaidCall(agentDid);
+    res.json({
+      ...(data as object),
+      agentCreditScore: newScore,
+      scoreGained: "+5",
+      callsToNextTier: bureau.callsToNextTier(newScore),
+    });
+  } catch (err) {
+    res.status(502).json({
+      error: "upstream_error",
+      message: String(err),
+      note: "Your payment was accepted but the upstream SqueezeOS backend returned an error. Contact scriptmasterlabs@gmail.com with your X-Payment-Proof for a refund.",
+    });
+  }
 });
 
 /** Full beastmode scan — 0.10 RLUSD */
 app.post("/api/beastmode/full", agentDidMiddleware, dynamicPriceGate, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
-  const newScore = await bureau.recordPaidCall(agentDid);
-
-  res.json({
-    tool: "beastmode_full",
-    tier: "paid",
-    scan: {
-      squeeze: true,
-      confidence: 0.89,
-      signals: [
-        { timeframe: "15m", signal: "SQUEEZE_FIRE", strength: 0.91 },
-        { timeframe: "1h", signal: "MOMENTUM_BUILD", strength: 0.78 },
-        { timeframe: "4h", signal: "ACCUMULATION", strength: 0.84 },
-      ],
-      entry: 0.512,
-      target1: 0.558,
-      target2: 0.603,
-      stopLoss: 0.488,
-      riskReward: 2.8,
-    },
-    agentCreditScore: newScore,
-    scoreGained: "+5",
-  });
+  if (!SQUEEZEOS_UPSTREAM_URL) {
+    res.status(503).json({ error: "upstream_not_configured", message: "SQUEEZEOS_UPSTREAM_URL is not set on this server. Contact the operator." });
+    return;
+  }
+  try {
+    const data = await callUpstream("POST", "/api/beastmode/full", req.body as Record<string, unknown>);
+    const newScore = await bureau.recordPaidCall(agentDid);
+    res.json({ ...(data as object), agentCreditScore: newScore, scoreGained: "+5", callsToNextTier: bureau.callsToNextTier(newScore) });
+  } catch (err) {
+    res.status(502).json({
+      error: "upstream_error",
+      message: String(err),
+      note: "Your payment was accepted but the upstream SqueezeOS backend returned an error. Contact scriptmasterlabs@gmail.com with your X-Payment-Proof for a refund.",
+    });
+  }
 });
 
 /** Full credit report — 0.10 RLUSD */
@@ -654,36 +699,10 @@ async function executeTool(
 ): Promise<unknown> {
   switch (toolId) {
     case "council_full":
-      return {
-        tool: "council",
-        council: [
-          { agent: "QUANT_ALPHA",    signal: "BUY",  confidence: 0.82, reasoning: "RSI oversold + MACD crossover on 4h" },
-          { agent: "RISK_SENTINEL",  signal: "HOLD", confidence: 0.71, reasoning: "Liquidity thin above $0.58 — gap risk" },
-          { agent: "MACRO_ORACLE",   signal: "BUY",  confidence: 0.76, reasoning: "XRP/USD correlation with DXY breakdown" },
-          { agent: "SENTIMENT_AI",   signal: "BUY",  confidence: 0.88, reasoning: "Social velocity +340% — institutional mentions rising" },
-          { agent: "CHAIN_ANALYST",  signal: "BUY",  confidence: 0.79, reasoning: "Exchange outflows 2.1M XRP last 4h — accumulation" },
-          { agent: "VOLUME_HAWK",    signal: "HOLD", confidence: 0.65, reasoning: "Volume declining into resistance — confirm break" },
-          { agent: "BREAKOUT_BOT",   signal: "BUY",  confidence: 0.84, reasoning: "Price coiling above 20EMA — breakout probability 84%" },
-        ],
-        consensus: "BUY (5/7)",
-        symbol: (inputs["symbol"] as string | undefined) ?? "N/A",
-      };
+      return callUpstream("POST", "/api/council", inputs);
 
     case "beastmode_full":
-      return {
-        tool: "beastmode_full",
-        scan: {
-          squeeze: true,
-          confidence: 0.89,
-          signals: [
-            { timeframe: "15m", signal: "SQUEEZE_FIRE",    strength: 0.91 },
-            { timeframe: "1h",  signal: "MOMENTUM_BUILD",  strength: 0.78 },
-            { timeframe: "4h",  signal: "ACCUMULATION",    strength: 0.84 },
-          ],
-          entry: 0.512, target1: 0.558, target2: 0.603, stopLoss: 0.488, riskReward: 2.8,
-        },
-        symbol: (inputs["symbol"] as string | undefined) ?? "N/A",
-      };
+      return callUpstream("POST", "/api/beastmode/full", inputs);
 
     case "credit_score_read": {
       const score = await bureau.getScore(agentDid);

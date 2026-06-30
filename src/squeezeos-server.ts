@@ -46,6 +46,19 @@ const RECEIVING_ADDRESS = process.env.XRPL_RECEIVING_ADDRESS ?? "";
 const WALLET_SEED = process.env.XRPL_WALLET_SEED ?? "";
 const NETWORK = (process.env.XRPL_NETWORK ?? "xrpl-mainnet") as "xrpl-mainnet" | "xrpl-testnet";
 
+/**
+ * URL of the upstream SqueezeOS Python intelligence server.
+ * REQUIRED for paid endpoints — if unset, paid calls return 503.
+ * Example: https://squeezeos-api.onrender.com
+ */
+const SQUEEZEOS_UPSTREAM_URL = (process.env.SQUEEZEOS_UPSTREAM_URL ?? "").replace(/\/$/, "");
+
+/**
+ * Optional shared secret forwarded as X-Internal-Secret to the upstream.
+ * Set this in both services to prevent unauthenticated direct hits on the Python backend.
+ */
+const SQUEEZEOS_INTERNAL_SECRET = process.env.SQUEEZEOS_INTERNAL_SECRET ?? "";
+
 /** 0.10 RLUSD per paid call */
 const COUNCIL_PRICE_RLUSD = "0.10";
 /** Volume discount threshold — agents with score >= 700 pay 0.08 */
@@ -59,7 +72,11 @@ const app = express();
 app.use(express.json());
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
-const bureau = new CreditBureau(redis);
+const bureau = new CreditBureau(redis, {
+  xahauSeed: process.env.XAHAU_SEED,
+  xahauWs: process.env.XAHAU_WS,
+  ghostLayerUrl: process.env.GHOST_LAYER_URL,
+});
 const catalog = new ToolCatalog();
 
 // Attach x402 client middleware (for agent-initiated payments flowing through)
@@ -143,11 +160,14 @@ app.get("/", (_req, res) => {
     description: "Institutional-grade AI market intelligence. Pay per call in RLUSD on XRPL. No subscriptions, no API keys, no accounts.",
     endpoints: {
       discovery: {
-        toolCatalog:    "GET /.well-known/mcp         — full tool manifest with pricing",
-        agentGuide:     "GET /agent                   — step-by-step onboarding playbook",
-        creditScore:    "GET /api/credit-score        — your ARGUS bureau score (free, always)",
-        preFlightQuote: "GET /x402/quote?tool=<id>    — exact cost before spending (free)",
-        health:         "GET /health                  — server liveness",
+        toolCatalog:    "GET /.well-known/mcp                   — full tool manifest with pricing",
+        agentCard:      "GET /.well-known/agent.json            — A2A-compatible AgentCard",
+        agentGuide:     "GET /agent                             — step-by-step onboarding playbook",
+        creditScore:    "GET /api/credit-score                  — your ARGUS bureau score (free, always)",
+        creditAnchor:   "GET /api/credit-score/anchor/:wallet   — Xahau on-chain score anchor proof",
+        leaderboard:    "GET /leaderboard                       — top 50 agents by ARGUS score (public)",
+        preFlightQuote: "GET /x402/quote?tool=<id>              — exact cost before spending (free)",
+        health:         "GET /health                            — server liveness",
       },
       free: {
         beastmodePreview: "GET /api/beastmode          — squeeze signal, top result only (3/day)",
@@ -450,6 +470,42 @@ app.get("/api/credit-score", agentDidMiddleware, async (req, res) => {
   });
 });
 
+// ─── UPSTREAM PROXY ───────────────────────────────────────────────────────────
+
+/**
+ * Forward a request to the upstream SqueezeOS Python backend.
+ * Throws if SQUEEZEOS_UPSTREAM_URL is not configured or the upstream returns an error.
+ * Never returns mock data — callers must surface the error to the agent.
+ */
+async function callUpstream(
+  method: "GET" | "POST",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<unknown> {
+  if (!SQUEEZEOS_UPSTREAM_URL) {
+    throw new Error("SQUEEZEOS_UPSTREAM_URL env var is not set — upstream SqueezeOS backend is not configured");
+  }
+
+  const url = `${SQUEEZEOS_UPSTREAM_URL}${path}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (SQUEEZEOS_INTERNAL_SECRET) {
+    headers["X-Internal-Secret"] = SQUEEZEOS_INTERNAL_SECRET;
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "(unreadable body)");
+    throw new Error(`Upstream ${method} ${path} → HTTP ${res.status}: ${text}`);
+  }
+
+  return res.json() as Promise<unknown>;
+}
+
 // ─── PAID TIER ENDPOINTS ──────────────────────────────────────────────────────
 
 /** Dynamic price gate — checks agent credit score, applies VIP if eligible */
@@ -457,6 +513,9 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
   const agentDid = (req as Request & { agentDid: string }).agentDid ?? "did:anonymous";
   const score = await bureau.getScore(agentDid);
   const proofHeader = req.headers["x-payment-proof"] as string | undefined;
+
+  // Compute price first — used in both proof verification and 402 response
+  const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
 
   if (proofHeader) {
     // Verify payment on-chain before granting access
@@ -467,22 +526,24 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
       next();
       return;
     }
-    res.status(403).json({
-      error: "payment_verification_failed",
-      reason: verification.error,
-      protocol: "x402/1.0",
-      note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches receiving address, RLUSD (not XRP), correct issuer, sufficient amount.",
-      agentGuide: `${req.protocol}://${req.get("host")}/agent`,
-      receivingAddress: RECEIVING_ADDRESS,
-      expectedAmount: price,
-      expectedCurrency: "RLUSD",
-      expectedNetwork: "xrpl-mainnet",
-    });
+    res.status(403)
+      .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+      .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+      .json({
+        error: "payment_verification_failed",
+        reason: verification.error,
+        protocol: "x402/1.0",
+        note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches receiving address, RLUSD (not XRP), correct issuer, sufficient amount.",
+        agentGuide: `${req.protocol}://${req.get("host")}/agent`,
+        receivingAddress: RECEIVING_ADDRESS,
+        expectedAmount: price,
+        expectedCurrency: "RLUSD",
+        expectedNetwork: "xrpl-mainnet",
+      });
     return;
   }
 
   // Issue dynamic 402 based on credit score
-  const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
   const agentTier = score >= 800 ? "QUASAR" : score >= 700 ? "PULSAR" : score >= 500 ? "NEUTRON" : "PROTOSTAR";
   const requestedPath = req.path;
   const toolIdGuess = requestedPath.includes("beastmode") ? "beastmode_full"
@@ -506,6 +567,8 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
     .setHeader("X-402-Network", "xrpl-mainnet")
     .setHeader("X-402-Currency", "RLUSD")
     .setHeader("X-402-Amount", price)
+    .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+    .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
     .json({
       error: "payment_required",
       protocol: "x402/1.0",
@@ -547,61 +610,66 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
 app.post("/api/council", agentDidMiddleware, dynamicPriceGate, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
 
-  // Increment credit score on successful paid call (+5 pts)
-  const newScore = await bureau.recordPaidCall(agentDid);
+  if (!SQUEEZEOS_UPSTREAM_URL) {
+    res.status(503).json({
+      error: "upstream_not_configured",
+      message: "SQUEEZEOS_UPSTREAM_URL is not set on this server. Contact the operator.",
+    });
+    return;
+  }
 
-  res.json({
-    tool: "council",
-    tier: "paid",
-    council: [
-      { agent: "QUANT_ALPHA", signal: "BUY", confidence: 0.82, reasoning: "RSI oversold + MACD crossover on 4h" },
-      { agent: "RISK_SENTINEL", signal: "HOLD", confidence: 0.71, reasoning: "Liquidity thin above $0.58 — gap risk" },
-      { agent: "MACRO_ORACLE", signal: "BUY", confidence: 0.76, reasoning: "XRP/USD correlation with DXY breakdown" },
-      { agent: "SENTIMENT_AI", signal: "BUY", confidence: 0.88, reasoning: "Social velocity +340% — institutional mentions rising" },
-      { agent: "CHAIN_ANALYST", signal: "BUY", confidence: 0.79, reasoning: "Exchange outflows 2.1M XRP last 4h — accumulation" },
-      { agent: "VOLUME_HAWK", signal: "HOLD", confidence: 0.65, reasoning: "Volume declining into resistance — confirm break" },
-      { agent: "BREAKOUT_BOT", signal: "BUY", confidence: 0.84, reasoning: "Price coiling above 20EMA — breakout probability 84%" },
-    ],
-    consensus: "BUY (5/7)",
-    agentCreditScore: newScore,
-    scoreGained: "+5",
-    callsToVip: bureau.callsToNextTier(newScore),
-    poweredBy: "SqueezeOS x ScriptMasterLabs",
-  });
+  try {
+    const data = await callUpstream("POST", "/api/council", req.body as Record<string, unknown>);
+    const newScore = await bureau.recordPaidCall(agentDid);
+    const tier = bureau.getTier(newScore);
+    res.setHeader("X-402-Score-Earned", String(newScore));
+    res.setHeader("X-402-Tier", tier.name);
+    res.json({
+      ...(data as object),
+      agentCreditScore: newScore,
+      scoreGained: "+5",
+      callsToNextTier: bureau.callsToNextTier(newScore),
+    });
+  } catch (err) {
+    res.status(502).json({
+      error: "upstream_error",
+      message: String(err),
+      note: "Your payment was accepted but the upstream SqueezeOS backend returned an error. Contact scriptmasterlabs@gmail.com with your X-Payment-Proof for a refund.",
+    });
+  }
 });
 
 /** Full beastmode scan — 0.10 RLUSD */
 app.post("/api/beastmode/full", agentDidMiddleware, dynamicPriceGate, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
-  const newScore = await bureau.recordPaidCall(agentDid);
-
-  res.json({
-    tool: "beastmode_full",
-    tier: "paid",
-    scan: {
-      squeeze: true,
-      confidence: 0.89,
-      signals: [
-        { timeframe: "15m", signal: "SQUEEZE_FIRE", strength: 0.91 },
-        { timeframe: "1h", signal: "MOMENTUM_BUILD", strength: 0.78 },
-        { timeframe: "4h", signal: "ACCUMULATION", strength: 0.84 },
-      ],
-      entry: 0.512,
-      target1: 0.558,
-      target2: 0.603,
-      stopLoss: 0.488,
-      riskReward: 2.8,
-    },
-    agentCreditScore: newScore,
-    scoreGained: "+5",
-  });
+  if (!SQUEEZEOS_UPSTREAM_URL) {
+    res.status(503).json({ error: "upstream_not_configured", message: "SQUEEZEOS_UPSTREAM_URL is not set on this server. Contact the operator." });
+    return;
+  }
+  try {
+    const data = await callUpstream("POST", "/api/beastmode/full", req.body as Record<string, unknown>);
+    const newScore = await bureau.recordPaidCall(agentDid);
+    const tier = bureau.getTier(newScore);
+    res.setHeader("X-402-Score-Earned", String(newScore));
+    res.setHeader("X-402-Tier", tier.name);
+    res.json({ ...(data as object), agentCreditScore: newScore, scoreGained: "+5", callsToNextTier: bureau.callsToNextTier(newScore) });
+  } catch (err) {
+    res.status(502).json({
+      error: "upstream_error",
+      message: String(err),
+      note: "Your payment was accepted but the upstream SqueezeOS backend returned an error. Contact scriptmasterlabs@gmail.com with your X-Payment-Proof for a refund.",
+    });
+  }
 });
 
 /** Full credit report — 0.10 RLUSD */
 app.post("/api/credit-score/report", agentDidMiddleware, dynamicPriceGate, async (req, res) => {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const newScore = await bureau.recordPaidCall(agentDid);
+  const tier = bureau.getTier(newScore);
+  res.setHeader("X-402-Score-Earned", String(newScore));
+  res.setHeader("X-402-Tier", tier.name);
   const report = await bureau.getFullReport(agentDid);
-
   res.json({ tool: "credit_report", tier: "paid", report });
 });
 
@@ -641,36 +709,10 @@ async function executeTool(
 ): Promise<unknown> {
   switch (toolId) {
     case "council_full":
-      return {
-        tool: "council",
-        council: [
-          { agent: "QUANT_ALPHA",    signal: "BUY",  confidence: 0.82, reasoning: "RSI oversold + MACD crossover on 4h" },
-          { agent: "RISK_SENTINEL",  signal: "HOLD", confidence: 0.71, reasoning: "Liquidity thin above $0.58 — gap risk" },
-          { agent: "MACRO_ORACLE",   signal: "BUY",  confidence: 0.76, reasoning: "XRP/USD correlation with DXY breakdown" },
-          { agent: "SENTIMENT_AI",   signal: "BUY",  confidence: 0.88, reasoning: "Social velocity +340% — institutional mentions rising" },
-          { agent: "CHAIN_ANALYST",  signal: "BUY",  confidence: 0.79, reasoning: "Exchange outflows 2.1M XRP last 4h — accumulation" },
-          { agent: "VOLUME_HAWK",    signal: "HOLD", confidence: 0.65, reasoning: "Volume declining into resistance — confirm break" },
-          { agent: "BREAKOUT_BOT",   signal: "BUY",  confidence: 0.84, reasoning: "Price coiling above 20EMA — breakout probability 84%" },
-        ],
-        consensus: "BUY (5/7)",
-        symbol: (inputs["symbol"] as string | undefined) ?? "N/A",
-      };
+      return callUpstream("POST", "/api/council", inputs);
 
     case "beastmode_full":
-      return {
-        tool: "beastmode_full",
-        scan: {
-          squeeze: true,
-          confidence: 0.89,
-          signals: [
-            { timeframe: "15m", signal: "SQUEEZE_FIRE",    strength: 0.91 },
-            { timeframe: "1h",  signal: "MOMENTUM_BUILD",  strength: 0.78 },
-            { timeframe: "4h",  signal: "ACCUMULATION",    strength: 0.84 },
-          ],
-          entry: 0.512, target1: 0.558, target2: 0.603, stopLoss: 0.488, riskReward: 2.8,
-        },
-        symbol: (inputs["symbol"] as string | undefined) ?? "N/A",
-      };
+      return callUpstream("POST", "/api/beastmode/full", inputs);
 
     case "credit_score_read": {
       const score = await bureau.getScore(agentDid);
@@ -696,6 +738,124 @@ app.post(
     executeTool,
   })
 );
+
+// ─── LEADERBOARD — public, no auth ───────────────────────────────────────────
+
+/**
+ * GET /leaderboard — top 50 agents by ARGUS score.
+ * Results are cached in Redis for 30 seconds to avoid blocking key scans.
+ */
+app.get("/leaderboard", async (_req, res) => {
+  const cached = await redis.get("leaderboard:cache");
+  if (cached) {
+    res.setHeader("X-Leaderboard-Cache", "HIT");
+    res.json(JSON.parse(cached) as unknown);
+    return;
+  }
+
+  const keys = await redis.keys("bureau:score:*");
+
+  if (keys.length === 0) {
+    const empty = { leaderboard: [], totalAgents: 0, generatedAt: new Date().toISOString(), note: "No agents registered yet." };
+    res.json(empty);
+    return;
+  }
+
+  const entries = await Promise.all(
+    keys.map(async (key) => {
+      const agentDid = key.replace("bureau:score:", "");
+      const [scoreRaw, callsRaw, lastSeen] = await Promise.all([
+        redis.get(key),
+        redis.get(`bureau:calls:${agentDid}`),
+        redis.get(`bureau:lastSeen:${agentDid}`),
+      ]);
+      const score = Number(scoreRaw ?? 300);
+      return {
+        agentDid,
+        score,
+        tier: bureau.getTier(score).name,
+        calls: Number(callsRaw ?? 0),
+        lastSeen: lastSeen ?? "unknown",
+      };
+    })
+  );
+
+  entries.sort((a, b) => b.score - a.score);
+  const top50 = entries.slice(0, 50);
+
+  const result = {
+    leaderboard: top50,
+    totalAgents: entries.length,
+    generatedAt: new Date().toISOString(),
+    note: "ARGUS Credit Bureau leaderboard — top 50 agents by score. Refreshed every 30 s.",
+    topUpUrl: "https://www.scriptmasterlabs.com/central-bank.html",
+  };
+
+  await redis.set("leaderboard:cache", JSON.stringify(result), "EX", 30);
+  res.setHeader("X-Leaderboard-Cache", "MISS");
+  res.json(result);
+});
+
+// ─── ON-CHAIN ANCHOR LOOKUP ────────────────────────────────────────────────────
+
+/**
+ * GET /api/credit-score/anchor/:wallet — return the Xahau on-chain anchor
+ * for an agent identified by their XRPL wallet address.
+ */
+app.get("/api/credit-score/anchor/:wallet", async (req, res) => {
+  const wallet = req.params.wallet;
+  const agentDid = `did:poi:xrpl:${wallet}`;
+  const anchorRaw = await redis.get(`bureau:anchor:${agentDid}`);
+
+  if (!anchorRaw) {
+    res.status(404).json({
+      error: "no_anchor",
+      message: "No on-chain Xahau anchor found for this wallet. Anchors are written after paid calls when the server is configured with XAHAU_SEED.",
+      agentDid,
+    });
+    return;
+  }
+
+  const anchor = JSON.parse(anchorRaw) as { txHash: string; network: string; anchoredAt: string; score: number; tier: string };
+  res.json({
+    agentDid,
+    onChainAnchor: anchor,
+    verifyUrl: `https://xahau.network/tx/${anchor.txHash}`,
+    note: "Score anchored on Xahau via self-payment memo. Verify independently at the URL above.",
+  });
+});
+
+// ─── CALL HISTORY — free, public ─────────────────────────────────────────────
+
+/**
+ * GET /api/credit-score/history/:wallet — return the agent's call timestamp
+ * ring buffer (up to 20 entries). Free, no auth required.
+ * Agents can audit their own score progression without paying for the full report.
+ */
+app.get("/api/credit-score/history/:wallet", async (req, res) => {
+  const wallet = req.params.wallet;
+  const agentDid = `did:poi:xrpl:${wallet}`;
+
+  const [score, history, callsRaw] = await Promise.all([
+    bureau.getScore(agentDid),
+    bureau.getHistory(agentDid),
+    redis.get(`bureau:calls:${agentDid}`),
+  ]);
+
+  const tier = bureau.getTier(score);
+
+  res.json({
+    agentDid,
+    wallet,
+    creditScore: score,
+    tier: tier.name,
+    totalPaidCalls: callsRaw !== null ? Number(callsRaw) : 0,
+    callHistory: history,
+    historyNote: "Timestamps of the last 20 paid calls (newest first). Each call earns +5 ARGUS pts.",
+    callsToNextTier: bureau.callsToNextTier(score),
+    fullReportUrl: "/api/credit-score/report (0.10 RLUSD — includes on-chain anchor + benefit details)",
+  });
+});
 
 // ─── HEALTH ───────────────────────────────────────────────────────────────────
 

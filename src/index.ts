@@ -33,3 +33,17 @@ export { verifyRlusdPayment, decodeProofHeader } from "./payment-verifier.js";
 export type { PaymentProofClaim, VerificationResult } from "./payment-verifier.js";
 
 export { startLeviathan, OFFERINGS } from "./acp/leviathan.js";
+
+export { computeRSI } from "./indicators.js";
+
+export { blackScholesDelta } from "./greeks.js";
+export type { OptionType, DeltaInputs } from "./greeks.js";
+
+export { buildHeatmap } from "./heatmap.js";
+export type { HeatmapItem, HeatmapGroupResult, HeatmapResult, BuildHeatmapOptions } from "./heatmap.js";
+
+export { fetchEquityCloses, fetchOptionsChainSnapshot } from "./market-data.js";
+export type { EquityTimeframe, OptionContractSnapshot, OptionsChainSnapshot, OptionsChainQuery } from "./market-data.js";
+
+export { runSwarm, EQUITIES_SWARM_PERSONAS, OPTIONS_SWARM_PERSONAS } from "./ai-swarm.js";
+export type { SwarmPersona, SwarmMemberResult, SwarmResult, SwarmOptions } from "./ai-swarm.js";

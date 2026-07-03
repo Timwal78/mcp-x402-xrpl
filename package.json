@@ -44,6 +44,7 @@
   "dependencies": {
     "@virtuals-protocol/acp-node-v2": "^0.1.6",
     "express": "^4.19.2",
+    "ioredis": "^5.4.1",
     "xrpl": "^3.0.0"
   },
   "devDependencies": {

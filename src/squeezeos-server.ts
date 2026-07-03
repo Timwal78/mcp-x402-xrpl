@@ -93,6 +93,35 @@ const FREE_TIER_DAILY_LIMIT = 3;
 const app = express();
 app.use(express.json());
 
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+// Reads CORS_ORIGINS env var (comma-separated). Falls back to SML domains.
+const _corsAllowed = new Set(
+  (process.env.CORS_ORIGINS ?? "https://www.scriptmasterlabs.com,https://scriptmasterlabs.com")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin && _corsAllowed.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  } else if (!origin) {
+    // Non-browser calls (agents, curl) — no CORS header needed
+  } else {
+    // Unknown origin: still allow — this is a public API
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Payment-Proof, X-Agent-DID, X-Idempotency-Key, X-Payment-Token, X-Leviathan-Key");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 const bureau = new CreditBureau(redis, {
   xahauSeed: process.env.XAHAU_SEED,

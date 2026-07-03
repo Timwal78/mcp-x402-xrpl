@@ -39,6 +39,11 @@ import { createOrchestrateHandler } from "./orchestrate.js";
 import { CreditBureau } from "./credit-bureau.js";
 import { ToolCatalog } from "./tool-catalog.js";
 import { verifyRlusdPayment } from "./payment-verifier.js";
+import { fetchEquityCloses, fetchOptionsChainSnapshot, type EquityTimeframe } from "./market-data.js";
+import { computeRSI } from "./indicators.js";
+import { blackScholesDelta } from "./greeks.js";
+import { buildHeatmap, type HeatmapItem, type HeatmapResult } from "./heatmap.js";
+import { runSwarm, EQUITIES_SWARM_PERSONAS, OPTIONS_SWARM_PERSONAS } from "./ai-swarm.js";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +92,31 @@ const COUNCIL_PRICE_RLUSD = "0.10";
 const VIP_PRICE_RLUSD = "0.08";
 /** Free tier rate limits per agent DID per day */
 const FREE_TIER_DAILY_LIMIT = 3;
+
+/**
+ * Polygon.io API key. REQUIRED for equities RSI heatmap and options Delta
+ * heatmap endpoints — if unset, those endpoints return 503.
+ */
+const POLYGON_API_KEY = process.env.POLYGON_API_KEY ?? "";
+
+/**
+ * Anthropic API key. REQUIRED for the AI swarm synthesis on the paid
+ * heatmap endpoints — if unset, those endpoints return 503.
+ */
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
+
+/** 0.10 RLUSD standard — RSI heatmap + 4-agent equities swarm */
+const EQUITIES_HEATMAP_PRICE = "0.10";
+/** 0.15 RLUSD standard — options chain fetch + Delta calc + 4-agent options swarm (pricier: more upstream calls) */
+const OPTIONS_DELTA_HEATMAP_PRICE = "0.15";
+
+const DEFAULT_EQUITY_WATCHLIST = [
+  "AAPL", "MSFT", "NVDA", "AMZN",
+  "GOOGL", "META", "TSLA", "AMD",
+  "NFLX", "JPM", "XOM", "UNH",
+  "V", "COST", "AVGO", "CRM",
+];
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
 
@@ -290,16 +320,20 @@ app.get("/", (_req, res) => {
         health:         "GET /health                            — server liveness",
       },
       free: {
-        beastmodePreview: "GET /api/beastmode          — squeeze signal, top result only (3/day)",
-        councilDemo:      "GET /api/demo/council       — 1/7 AI council members, watermarked (3/day)",
+        beastmodePreview:      "GET /api/beastmode                    — squeeze signal, top result only (3/day)",
+        councilDemo:           "GET /api/demo/council                 — 1/7 AI council members, watermarked (3/day)",
+        equitiesHeatmapPreview: "GET /api/equities/heatmap/preview     — RSI heatmap, 5 tickers/1 group, no swarm (3/day)",
+        optionsDeltaPreview:   "GET /api/options/delta-heatmap/preview — Delta heatmap, 5 contracts/1 group, no swarm (3/day)",
       },
       paid: {
-        councilFull:    "POST /api/council            — 7-agent AI council verdict (0.10 RLUSD)",
-        beastmodeFull:  "POST /api/beastmode/full     — full scan, all timeframes (0.10 RLUSD)",
-        creditReport:   "POST /api/credit-score/report — ARGUS full credit report (0.10 RLUSD)",
-        orchestrate:    "POST /x402/orchestrate       — multi-step workflow, single payment (0.10–0.20 RLUSD)",
-        memoryWrite:    "PUT  /api/memory/:key        — persist agent context/state (0.01 RLUSD/write)",
-        marketplaceBuy: "POST /api/marketplace/buy/:id — purchase a signal (0.02 RLUSD)",
+        councilFull:        "POST /api/council                     — 7-agent AI council verdict (0.10 RLUSD)",
+        beastmodeFull:      "POST /api/beastmode/full              — full scan, all timeframes (0.10 RLUSD)",
+        creditReport:       "POST /api/credit-score/report         — ARGUS full credit report (0.10 RLUSD)",
+        equitiesHeatmapFull: "POST /api/equities/heatmap/full       — RSI heatmap (up to 20 tickers, 4 groups) + 4-agent Claude swarm (0.10 RLUSD)",
+        optionsDeltaFull:   "POST /api/options/delta-heatmap/full  — live options chain, self-computed Black-Scholes Delta heatmap + 4-agent Claude swarm (0.15 RLUSD)",
+        orchestrate:        "POST /x402/orchestrate                — multi-step workflow, single payment (0.10–0.20 RLUSD)",
+        memoryWrite:        "PUT  /api/memory/:key                 — persist agent context/state (0.01 RLUSD/write)",
+        marketplaceBuy:     "POST /api/marketplace/buy/:id         — purchase a signal (0.02 RLUSD)",
       },
       earn: {
         marketplaceSubmit: "POST /api/marketplace/submit   — list your signal (free to submit, earn 90% per sale)",
@@ -400,10 +434,12 @@ app.get("/agent", (_req, res) => {
       },
     },
     availableTools: [
-      { id: "council_full",       method: "POST", path: "/api/council",             price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
-      { id: "beastmode_full",     method: "POST", path: "/api/beastmode/full",      price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
-      { id: "credit_report_full", method: "POST", path: "/api/credit-score/report", price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
-      { id: "orchestrate",        method: "POST", path: "/x402/orchestrate",        price: "0.10–0.20 RLUSD depending on workflow" },
+      { id: "council_full",               method: "POST", path: "/api/council",                     price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "beastmode_full",             method: "POST", path: "/api/beastmode/full",              price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "credit_report_full",         method: "POST", path: "/api/credit-score/report",         price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "equities_heatmap_full",      method: "POST", path: "/api/equities/heatmap/full",       price: "0.10 RLUSD (VIP: 0.08, Platinum: 0.06)" },
+      { id: "options_delta_heatmap_full", method: "POST", path: "/api/options/delta-heatmap/full",  price: "0.15 RLUSD (VIP: 0.12, Platinum: 0.09)" },
+      { id: "orchestrate",                method: "POST", path: "/x402/orchestrate",                price: "0.10–0.20 RLUSD depending on workflow" },
     ],
     orchestrateWorkflows: [
       { id: "market_intel",  tools: ["council_full", "beastmode_full"],                   standardRlusd: "0.20", vipRlusd: "0.16", platinumRlusd: "0.12" },
@@ -523,6 +559,26 @@ app.get("/.well-known/agent.json", (_req, res) => {
         inputModes: ["application/json"],
         outputModes: ["application/json"],
         payment: { amount: "0.10", currency: "RLUSD", discountApplies: true },
+      },
+      {
+        id: "equities_heatmap",
+        name: "Equities RSI Heatmap + AI Swarm",
+        description: "RSI(14) heatmap across up to 20 tickers (default watchlist of 16 large caps), grouped into 4 buckets, plus a 4-agent Claude swarm verdict (MOMENTUM_QUANT, SECTOR_ROTATION, RISK_SENTINEL, MACRO_ORACLE) synthesizing the read.",
+        tags: ["equities", "rsi", "heatmap", "ai-swarm", "market-intelligence"],
+        examples: ["RSI heatmap for my watchlist on the 1h timeframe", "Which of these stocks are overbought right now?"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.10", currency: "RLUSD", discountApplies: true },
+      },
+      {
+        id: "options_delta_heatmap",
+        name: "Options Delta Heatmap + AI Swarm",
+        description: "Live options chain snapshot with locally-computed Black-Scholes Delta per contract, grouped into 4 buckets, plus a 4-agent Claude swarm verdict (GREEKS_ANALYST, IV_SKEW_HUNTER, GAMMA_WATCH, RISK_SENTINEL).",
+        tags: ["options", "delta", "greeks", "heatmap", "ai-swarm", "market-intelligence"],
+        examples: ["Delta heatmap for SPY calls", "Show me the delta distribution on next month's QQQ puts"],
+        inputModes: ["application/json"],
+        outputModes: ["application/json"],
+        payment: { amount: "0.15", currency: "RLUSD", discountApplies: true },
       },
       {
         id: "orchestrate",
@@ -885,10 +941,12 @@ app.post("/api/credit-score/report", agentDidMiddleware, dynamicPriceGate, async
 /** Build the pricing map the quote handler needs from the tool catalog. */
 function buildQuotePricingMap(): Record<string, { amount: string; currency: "RLUSD" | "USDC" | "XRP"; network: string; vipAmount?: string; platinumAmount?: string }> {
   return {
-    council_full:       { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
-    beastmode_full:     { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
-    credit_report_full: { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
-    orchestrate:        { amount: "variable", currency: "RLUSD", network: "xrpl-mainnet" },
+    council_full:               { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
+    beastmode_full:             { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
+    credit_report_full:         { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
+    equities_heatmap_full:      { amount: "0.10", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.08", platinumAmount: "0.06" },
+    options_delta_heatmap_full: { amount: "0.15", currency: "RLUSD", network: "xrpl-mainnet", vipAmount: "0.12", platinumAmount: "0.09" },
+    orchestrate:                { amount: "variable", currency: "RLUSD", network: "xrpl-mainnet" },
   };
 }
 
@@ -929,6 +987,16 @@ async function executeTool(
 
     case "credit_report_full":
       return { tool: "credit_report", report: await bureau.getFullReport(agentDid) };
+
+    case "equities_heatmap_full": {
+      const typedInputs = inputs as { tickers?: string[]; timeframe?: EquityTimeframe };
+      return generateEquitiesHeatmap(typedInputs.tickers, typedInputs.timeframe);
+    }
+
+    case "options_delta_heatmap_full": {
+      const typedInputs = inputs as { underlying?: string; expirationDate?: string; optionType?: "call" | "put" };
+      return generateOptionsDeltaHeatmap(typedInputs.underlying, typedInputs.expirationDate, typedInputs.optionType);
+    }
 
     default:
       throw new Error(`Unknown tool: ${toolId}`);
@@ -1105,6 +1173,319 @@ function fixedPriceGate(price: string) {
     next();
   };
 }
+
+// ─── TIERED-PRICE GATE FACTORY ───────────────────────────────────────────────
+
+/**
+ * Like dynamicPriceGate, but for a specific named tool at a specific base
+ * price — no path-based toolId guessing. Applies the same ARGUS VIP/Platinum
+ * discount curve (score>=700 → 20% off, score>=800 → 40% off).
+ */
+function tieredPriceGate(basePrice: string, toolId: string) {
+  return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
+    if (LEVIATHAN_BYPASS_SECRET && req.headers["x-leviathan-key"] === LEVIATHAN_BYPASS_SECRET) {
+      next();
+      return;
+    }
+    const agentDid = (req as Request & { agentDid: string }).agentDid ?? "did:anonymous";
+    const score = await bureau.getScore(agentDid);
+    const base = parseFloat(basePrice);
+    const price = (score >= 800 ? base * 0.6 : score >= 700 ? base * 0.8 : base).toFixed(2);
+    const proofHeader = req.headers["x-payment-proof"] as string | undefined;
+
+    if (proofHeader) {
+      const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
+      if (verification.valid) {
+        (req as Request & { verifiedPayer?: string }).verifiedPayer = verification.payer;
+        next();
+        return;
+      }
+      res.status(403)
+        .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+        .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+        .json({
+          error: "payment_verification_failed",
+          reason: verification.error,
+          protocol: "x402/1.0",
+          expectedAmount: price,
+          expectedCurrency: "RLUSD",
+          expectedNetwork: "xrpl-mainnet",
+        });
+      return;
+    }
+
+    const agentTier = score >= 800 ? "QUASAR" : score >= 700 ? "PULSAR" : score >= 500 ? "NEUTRON" : "PROTOSTAR";
+    const requirements = {
+      destination: RECEIVING_ADDRESS,
+      amount: price,
+      currency: "RLUSD" as const,
+      network: "xrpl-mainnet",
+      issuer: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+      description: `SqueezeOS — ${toolId} — ${price} RLUSD (${agentTier}, score ${score})`,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const encoded = Buffer.from(JSON.stringify(requirements)).toString("base64");
+
+    res.status(402)
+      .setHeader("X-Payment-Requirements", encoded)
+      .setHeader("X-402-Protocol", "x402/1.0")
+      .setHeader("X-402-Network", "xrpl-mainnet")
+      .setHeader("X-402-Currency", "RLUSD")
+      .setHeader("X-402-Amount", price)
+      .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
+      .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+      .json({
+        error: "payment_required",
+        protocol: "x402/1.0",
+        tool: toolId,
+        network: "xrpl-mainnet",
+        currency: "RLUSD",
+        price,
+        agentCreditScore: score,
+        agentTier,
+        vipEligible: score >= 700,
+        requirements,
+        exampleRetryHeaders: {
+          "X-Payment-Proof": "<base64-encoded-proof>",
+          "X-Agent-DID": "did:poi:xrpl:<your-xrpl-wallet>",
+          "X-Idempotency-Key": "<uuid-v4>",
+          "Content-Type": "application/json",
+        },
+        quotePath: `/x402/quote?tool=${toolId}`,
+        agentGuide: `${req.protocol}://${req.get("host")}/agent`,
+      });
+  };
+}
+
+// ─── EQUITIES RSI HEATMAP + OPTIONS DELTA HEATMAP — AI swarm powered ─────────
+
+function buildEquitiesSwarmContext(heatmap: HeatmapResult, timeframe: string): string {
+  const lines = heatmap.groups.map(
+    (g) => `${g.group}: avg=${g.avg} min=${g.min} max=${g.max} | ${g.items.map((i) => `${i.symbol}=${i.value}`).join(", ")}`,
+  );
+  return [
+    `Equities RSI(14) heatmap — timeframe ${timeframe}, scale ${heatmap.scale}.`,
+    `Overbought threshold: ${heatmap.overboughtThreshold}. Oversold threshold: ${heatmap.oversoldThreshold}.`,
+    ...lines,
+  ].join("\n");
+}
+
+function buildOptionsSwarmContext(heatmap: HeatmapResult, underlying: string, optionType: string, underlyingPrice: number): string {
+  const lines = heatmap.groups.map(
+    (g) => `${g.group}: avg=${g.avg} min=${g.min} max=${g.max} | ${g.items.map((i) => `${i.symbol}=${i.value}`).join(", ")}`,
+  );
+  return [
+    `Options Delta heatmap — underlying ${underlying} @ ${underlyingPrice}, ${optionType}s, scale ${heatmap.scale}.`,
+    `High bucket (>=${heatmap.overboughtThreshold}) = deep ITM. Low bucket (<=${heatmap.oversoldThreshold}) = deep OTM.`,
+    ...lines,
+  ].join("\n");
+}
+
+/**
+ * Fetch closes for each ticker, compute RSI, group into a heatmap, and run
+ * the equities AI swarm over it. Used by both the direct route handler and
+ * the orchestrate tool executor. Throws (never mocks) on missing config or
+ * missing data.
+ */
+async function generateEquitiesHeatmap(tickers: string[] | undefined, timeframe: EquityTimeframe | undefined): Promise<unknown> {
+  const missing = [!POLYGON_API_KEY && "POLYGON_API_KEY", !ANTHROPIC_API_KEY && "ANTHROPIC_API_KEY"].filter(Boolean);
+  if (missing.length > 0) {
+    throw new Error(`not_configured: missing ${missing.join(", ")} on this server`);
+  }
+
+  const resolvedTimeframe: EquityTimeframe = timeframe ?? "1h";
+  const symbols = (tickers && tickers.length > 0 ? tickers : DEFAULT_EQUITY_WATCHLIST)
+    .slice(0, 20)
+    .map((s) => String(s).toUpperCase());
+
+  const items: HeatmapItem[] = [];
+  await Promise.all(
+    symbols.map(async (symbol) => {
+      const closes = await fetchEquityCloses(symbol, resolvedTimeframe, POLYGON_API_KEY);
+      const rsi = computeRSI(closes);
+      if (rsi !== null) items.push({ symbol, value: rsi });
+    }),
+  );
+
+  if (items.length === 0) {
+    throw new Error("no_data: could not compute RSI for any requested ticker — insufficient bar history from market data provider");
+  }
+
+  const heatmap = buildHeatmap(items, { overboughtThreshold: 70, oversoldThreshold: 30, scale: "RSI(14), 0-100" });
+  const swarm = await runSwarm(EQUITIES_SWARM_PERSONAS, buildEquitiesSwarmContext(heatmap, resolvedTimeframe), {
+    apiKey: ANTHROPIC_API_KEY,
+    model: ANTHROPIC_MODEL,
+  });
+
+  return { tool: "equities_heatmap_full", timeframe: resolvedTimeframe, heatmap, swarm };
+}
+
+/**
+ * Fetch an options chain snapshot, compute Delta per contract locally
+ * (Black-Scholes), group into a heatmap, and run the options AI swarm.
+ */
+async function generateOptionsDeltaHeatmap(
+  underlying: string | undefined,
+  expirationDate: string | undefined,
+  optionType: "call" | "put" | undefined,
+): Promise<unknown> {
+  const missing = [!POLYGON_API_KEY && "POLYGON_API_KEY", !ANTHROPIC_API_KEY && "ANTHROPIC_API_KEY"].filter(Boolean);
+  if (missing.length > 0) {
+    throw new Error(`not_configured: missing ${missing.join(", ")} on this server`);
+  }
+
+  const symbol = (underlying ?? "SPY").toUpperCase();
+  const side: "call" | "put" = optionType === "put" ? "put" : "call";
+
+  const chain = await fetchOptionsChainSnapshot(symbol, POLYGON_API_KEY, {
+    expirationDate,
+    contractType: side,
+    limit: 40,
+  });
+
+  if (chain.contracts.length === 0 || chain.underlyingPrice <= 0) {
+    throw new Error(`no_data: no options contracts (or underlying price) returned for ${symbol}`);
+  }
+
+  const items: HeatmapItem[] = chain.contracts.map((c) => {
+    const timeToExpiryYears = Math.max(
+      (new Date(c.expirationDate).getTime() - Date.now()) / (365.25 * 24 * 3600 * 1000),
+      1 / 365.25,
+    );
+    const delta = blackScholesDelta({
+      spot: chain.underlyingPrice,
+      strike: c.strike,
+      timeToExpiryYears,
+      volatility: c.impliedVolatility ?? 0.3,
+      optionType: side,
+    });
+    return {
+      symbol: `${symbol} ${c.strike}${side === "call" ? "C" : "P"} ${c.expirationDate}`,
+      value: Math.round(Math.abs(delta) * 1000) / 10,
+      meta: { strike: c.strike, expirationDate: c.expirationDate, impliedVolatility: c.impliedVolatility },
+    };
+  });
+
+  const heatmap = buildHeatmap(items, {
+    overboughtThreshold: 70,
+    oversoldThreshold: 30,
+    scale: `|Delta| x100 (deep ITM=high / deep OTM=low), ${side}s`,
+  });
+  const swarm = await runSwarm(
+    OPTIONS_SWARM_PERSONAS,
+    buildOptionsSwarmContext(heatmap, symbol, side, chain.underlyingPrice),
+    { apiKey: ANTHROPIC_API_KEY, model: ANTHROPIC_MODEL },
+  );
+
+  return { tool: "options_delta_heatmap_full", underlying: symbol, optionType: side, underlyingPrice: chain.underlyingPrice, heatmap, swarm };
+}
+
+/** GET /api/equities/heatmap/preview — free, 5 tickers, 1 group, no AI swarm. 3/day. */
+app.get("/api/equities/heatmap/preview", agentDidMiddleware, freeTierRateLimit, async (_req, res) => {
+  if (!POLYGON_API_KEY) {
+    res.status(503).json({ error: "market_data_not_configured", message: "POLYGON_API_KEY is not set on this server. Contact the operator." });
+    return;
+  }
+  try {
+    const previewSymbols = DEFAULT_EQUITY_WATCHLIST.slice(0, 5);
+    const items: HeatmapItem[] = [];
+    await Promise.all(
+      previewSymbols.map(async (symbol) => {
+        const closes = await fetchEquityCloses(symbol, "1h", POLYGON_API_KEY);
+        const rsi = computeRSI(closes);
+        if (rsi !== null) items.push({ symbol, value: rsi });
+      }),
+    );
+    const heatmap = buildHeatmap(items, { groupsOf: 1, overboughtThreshold: 70, oversoldThreshold: 30, scale: "RSI(14), 0-100" });
+    res.json({
+      tool: "equities_heatmap_preview",
+      tier: "free",
+      timeframe: "1h",
+      heatmap,
+      note: "Free preview: 5 tickers, 1 group, no AI swarm. Full heatmap (up to 20 tickers, 4 groups, 4-agent Claude swarm verdict) requires /api/equities/heatmap/full (0.10 RLUSD via x402).",
+      upgradeUrl: "/api/equities/heatmap/full",
+    });
+  } catch (err) {
+    res.status(502).json({ error: "heatmap_generation_failed", message: String(err) });
+  }
+});
+
+/**
+ * POST /api/equities/heatmap/full — 0.10 RLUSD (0.08 VIP / 0.06 Platinum).
+ * Body: { tickers?: string[] (max 20), timeframe?: "1h" | "1d" }
+ * Real RSI(14) heatmap grouped into 4 buckets + a 4-agent Claude swarm verdict.
+ */
+app.post("/api/equities/heatmap/full", agentDidMiddleware, tieredPriceGate(EQUITIES_HEATMAP_PRICE, "equities_heatmap_full"), async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const { tickers, timeframe } = req.body as { tickers?: string[]; timeframe?: EquityTimeframe };
+  try {
+    const result = await generateEquitiesHeatmap(tickers, timeframe);
+    const newScore = await bureau.recordPaidCall(agentDid);
+    res.setHeader("X-402-Score-Earned", String(newScore));
+    res.json({ ...(result as object), tier: "paid", agentCreditScore: newScore, scoreGained: "+5", callsToNextTier: bureau.callsToNextTier(newScore) });
+  } catch (err) {
+    res.status(502).json({
+      error: "heatmap_generation_failed",
+      message: String(err),
+      note: "Your payment was accepted but generation failed. Contact scriptmasterlabs@gmail.com with your X-Payment-Proof for a refund.",
+    });
+  }
+});
+
+/** GET /api/options/delta-heatmap/preview — free, SPY calls, 1 group, no AI swarm. 3/day. */
+app.get("/api/options/delta-heatmap/preview", agentDidMiddleware, freeTierRateLimit, async (req, res) => {
+  if (!POLYGON_API_KEY) {
+    res.status(503).json({ error: "market_data_not_configured", message: "POLYGON_API_KEY is not set on this server. Contact the operator." });
+    return;
+  }
+  const underlying = (req.query.underlying as string | undefined) ?? "SPY";
+  try {
+    const chain = await fetchOptionsChainSnapshot(underlying.toUpperCase(), POLYGON_API_KEY, { contractType: "call", limit: 5 });
+    if (chain.contracts.length === 0 || chain.underlyingPrice <= 0) {
+      res.status(502).json({ error: "no_data", message: `No options contracts returned for ${underlying}.` });
+      return;
+    }
+    const items: HeatmapItem[] = chain.contracts.map((c) => {
+      const timeToExpiryYears = Math.max((new Date(c.expirationDate).getTime() - Date.now()) / (365.25 * 24 * 3600 * 1000), 1 / 365.25);
+      const delta = blackScholesDelta({ spot: chain.underlyingPrice, strike: c.strike, timeToExpiryYears, volatility: c.impliedVolatility ?? 0.3, optionType: "call" });
+      return { symbol: `${chain.underlying} ${c.strike}C ${c.expirationDate}`, value: Math.round(Math.abs(delta) * 1000) / 10 };
+    });
+    const heatmap = buildHeatmap(items, { groupsOf: 1, overboughtThreshold: 70, oversoldThreshold: 30, scale: "|Delta| x100, calls" });
+    res.json({
+      tool: "options_delta_heatmap_preview",
+      tier: "free",
+      underlying: chain.underlying,
+      underlyingPrice: chain.underlyingPrice,
+      heatmap,
+      note: "Free preview: 5 call contracts, 1 group, no AI swarm. Full heatmap (up to 40 contracts, 4 groups, 4-agent Claude swarm verdict) requires /api/options/delta-heatmap/full (0.15 RLUSD via x402).",
+      upgradeUrl: "/api/options/delta-heatmap/full",
+    });
+  } catch (err) {
+    res.status(502).json({ error: "heatmap_generation_failed", message: String(err) });
+  }
+});
+
+/**
+ * POST /api/options/delta-heatmap/full — 0.15 RLUSD (0.12 VIP / 0.09 Platinum).
+ * Body: { underlying?: string (default SPY), expirationDate?: string, optionType?: "call" | "put" }
+ * Live options chain, locally-computed Black-Scholes Delta grouped into 4 buckets, + a 4-agent Claude swarm verdict.
+ */
+app.post("/api/options/delta-heatmap/full", agentDidMiddleware, tieredPriceGate(OPTIONS_DELTA_HEATMAP_PRICE, "options_delta_heatmap_full"), async (req, res) => {
+  const agentDid = (req as Request & { agentDid: string }).agentDid;
+  const { underlying, expirationDate, optionType } = req.body as { underlying?: string; expirationDate?: string; optionType?: "call" | "put" };
+  try {
+    const result = await generateOptionsDeltaHeatmap(underlying, expirationDate, optionType);
+    const newScore = await bureau.recordPaidCall(agentDid);
+    res.setHeader("X-402-Score-Earned", String(newScore));
+    res.json({ ...(result as object), tier: "paid", agentCreditScore: newScore, scoreGained: "+5", callsToNextTier: bureau.callsToNextTier(newScore) });
+  } catch (err) {
+    res.status(502).json({
+      error: "heatmap_generation_failed",
+      message: String(err),
+      note: "Your payment was accepted but generation failed. Contact scriptmasterlabs@gmail.com with your X-Payment-Proof for a refund.",
+    });
+  }
+});
 
 // ─── ARGUS VERIFY JWT — third-party verifiable score proof ───────────────────
 
@@ -1609,9 +1990,11 @@ app.listen(PORT, () => {
   console.log(`[SqueezeOS MCP] Catalog:     http://localhost:${PORT}/.well-known/mcp`);
   console.log(`[SqueezeOS MCP] Quote:       http://localhost:${PORT}/x402/quote?tool=<id>`);
   console.log(`[SqueezeOS MCP] Orchestrate: http://localhost:${PORT}/x402/orchestrate`);
-  console.log(`[SqueezeOS MCP] Free:        /api/beastmode, /api/demo/council, /api/credit-score`);
-  console.log(`[SqueezeOS MCP] Paid:        /api/council, /api/beastmode/full (0.10 RLUSD)`);
+  console.log(`[SqueezeOS MCP] Free:        /api/beastmode, /api/demo/council, /api/credit-score, /api/equities/heatmap/preview, /api/options/delta-heatmap/preview`);
+  console.log(`[SqueezeOS MCP] Paid:        /api/council, /api/beastmode/full (0.10 RLUSD), /api/equities/heatmap/full (0.10 RLUSD), /api/options/delta-heatmap/full (0.15 RLUSD)`);
   console.log(`[SqueezeOS MCP] Network: ${NETWORK} | Receiving: ${RECEIVING_ADDRESS}`);
+  if (!POLYGON_API_KEY) console.warn(`[SqueezeOS MCP] POLYGON_API_KEY not set — equities/options heatmap endpoints will 503`);
+  if (!ANTHROPIC_API_KEY) console.warn(`[SqueezeOS MCP] ANTHROPIC_API_KEY not set — AI swarm synthesis will 503`);
 
   if (process.env.ACP_WALLET_ID && process.env.ACP_SIGNER_PRIVATE_KEY) {
     import("./acp/leviathan.js").then(({ startLeviathan }) => {

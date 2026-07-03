@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "start": "tsx src/squeezeos-server.ts",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
     "example:pay-per-tool": "node examples/pay-per-tool.js",
     "leviathan": "node dist/acp/leviathan.js",
@@ -44,6 +45,8 @@
   "dependencies": {
     "@virtuals-protocol/acp-node-v2": "^0.1.6",
     "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "tsx": "^4.19.2",
     "xrpl": "^3.0.0"
   },
   "devDependencies": {

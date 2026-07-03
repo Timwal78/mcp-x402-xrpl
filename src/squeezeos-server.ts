@@ -151,7 +151,29 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+// Resilient Redis client. Two properties matter for keeping the front door open:
+//  - enableOfflineQueue:false + maxRetriesPerRequest:2 → commands REJECT fast when
+//    Redis is unreachable instead of queueing forever (which would hang every
+//    agent request until timeout and make the whole server look dead).
+//  - an 'error' listener so an emitted connection error never becomes an
+//    unhandled exception that crash-loops the process on Render.
+// Callers in the agent hot-path (below) catch these rejections and fail OPEN —
+// a Redis blip degrades bookkeeping, it does NOT block discovery or free-tier calls.
+const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+  maxRetriesPerRequest: 2,
+  enableOfflineQueue: false,
+  connectTimeout: 8000,
+  retryStrategy: (times) => Math.min(times * 500, 5000),
+});
+let _redisWarned = false;
+redis.on("error", (err) => {
+  if (!_redisWarned) {
+    console.error(`[SqueezeOS MCP] Redis error (server stays up, hot-path fails open): ${err?.message ?? err}`);
+    _redisWarned = true;
+  }
+});
+redis.on("ready", () => { _redisWarned = false; });
+
 const bureau = new CreditBureau(redis, {
   xahauSeed: process.env.XAHAU_SEED,
   xahauWs: process.env.XAHAU_WS,
@@ -189,8 +211,15 @@ async function agentDidMiddleware(req: Request, res: Response, next: NextFunctio
     agentDid = `did:anonymous:${req.ip?.replace(/[:.]/g, "-")}`;
   }
 
-  // Register agent in Credit Bureau on first touch (score starts at 300)
-  await bureau.ensureRegistered(agentDid);
+  // Register agent in Credit Bureau on first touch (score starts at 300).
+  // Fail OPEN: if Redis is unavailable the agent is still served — registration
+  // is bookkeeping, not a gate. Blocking discovery on a Redis blip is exactly
+  // the failure that made the front door look dead to visiting agents.
+  try {
+    await bureau.ensureRegistered(agentDid);
+  } catch (err) {
+    console.error(`[SqueezeOS MCP] ensureRegistered degraded (serving anyway): ${(err as Error)?.message ?? err}`);
+  }
 
   (req as Request & { agentDid: string }).agentDid = agentDid;
   next();
@@ -199,11 +228,22 @@ async function agentDidMiddleware(req: Request, res: Response, next: NextFunctio
 async function freeTierRateLimit(req: Request, res: Response, next: NextFunction): Promise<void> {
   const agentDid = (req as Request & { agentDid: string }).agentDid;
   const key = `free:${agentDid}:${new Date().toISOString().slice(0, 10)}`;
-  const count = await redis.incr(key);
-  await redis.expire(key, 86400); // 24h TTL
+
+  // Fail OPEN on Redis error: if we can't read the counter we allow the call
+  // rather than 500. A metering outage must never turn the free tier — the
+  // primary way agents discover us — into a wall of errors.
+  let count: number;
+  try {
+    count = await redis.incr(key);
+    await redis.expire(key, 86400); // 24h TTL
+  } catch (err) {
+    console.error(`[SqueezeOS MCP] freeTierRateLimit degraded (allowing call): ${(err as Error)?.message ?? err}`);
+    next();
+    return;
+  }
 
   if (count > FREE_TIER_DAILY_LIMIT) {
-    const currentScore = await bureau.getScore(agentDid);
+    const currentScore = await bureau.getScore(agentDid).catch(() => 300);
     const effectivePrice = currentScore >= 800 ? "0.06" : currentScore >= 700 ? "0.08" : COUNCIL_PRICE_RLUSD;
     res.status(429).json({
       error: "free_tier_exhausted",
@@ -1512,10 +1552,27 @@ app.get("/api/stats", async (_req, res) => {
   const agentTypes = ["claude", "gpt", "gemini", "perplexity", "grok", "python", "curl", "human", "bot", "unknown"];
   const today = new Date().toISOString().slice(0, 10);
 
-  const [todayValues, totalValues] = await Promise.all([
-    redis.mget(agentTypes.map((t) => `traffic:day:${today}:${t}`)),
-    redis.mget(agentTypes.map((t) => `traffic:total:${t}`)),
-  ]);
+  // Never 500 the dashboard's stats fetch on a Redis blip — degrade to zeros
+  // with an explicit flag so the UI shows an honest "awaiting/unavailable"
+  // state instead of the whole command center reading as broken.
+  let todayValues: (string | null)[] = [];
+  let totalValues: (string | null)[] = [];
+  try {
+    [todayValues, totalValues] = await Promise.all([
+      redis.mget(agentTypes.map((t) => `traffic:day:${today}:${t}`)),
+      redis.mget(agentTypes.map((t) => `traffic:total:${t}`)),
+    ]);
+  } catch (err) {
+    console.error(`[SqueezeOS MCP] /api/stats degraded: ${(err as Error)?.message ?? err}`);
+    res.status(200).json({
+      degraded: true,
+      today: { date: today, total: 0, byType: {} },
+      allTime: { total: 0, byType: {} },
+      aiAgentsToday: 0,
+      aiAgentsAllTime: 0,
+    });
+    return;
+  }
 
   const byTypeToday: Record<string, number> = {};
   const byTypeTotal: Record<string, number> = {};

@@ -102,6 +102,20 @@ const _corsAllowed = new Set(
     .filter(Boolean)
 );
 
+function _classifyAgent(ua: string | undefined): string {
+  if (!ua) return "unknown";
+  const u = ua.toLowerCase();
+  if (u.includes("claude") || u.includes("anthropic")) return "claude";
+  if (u.includes("gpt") || u.includes("openai") || u.includes("chatgpt")) return "gpt";
+  if (u.includes("gemini") || u.includes("google")) return "gemini";
+  if (u.includes("perplexity")) return "perplexity";
+  if (u.includes("grok") || u.includes("xai")) return "grok";
+  if (u.includes("python-httpx") || u.includes("python-requests") || u.includes("aiohttp")) return "python";
+  if (u.includes("curl")) return "curl";
+  if (u.includes("mozilla") || u.includes("webkit") || u.includes("chrome") || u.includes("safari")) return "human";
+  return "bot";
+}
+
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
   if (origin && _corsAllowed.has(origin)) {
@@ -119,6 +133,21 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     res.status(204).end();
     return;
   }
+
+  // Fire-and-forget traffic counter — does not block the request
+  const agentType = _classifyAgent(req.headers["user-agent"]);
+  const today = new Date().toISOString().slice(0, 10);
+  setImmediate(async () => {
+    try {
+      const dayKey = `traffic:day:${today}:${agentType}`;
+      const totalKey = `traffic:total:${agentType}`;
+      await Promise.all([
+        redis.incr(dayKey).then(() => redis.expire(dayKey, 172800)), // 48h TTL
+        redis.incr(totalKey),
+      ]);
+    } catch { /* non-critical */ }
+  });
+
   next();
 });
 
@@ -1473,6 +1502,40 @@ app.get("/api/forge/earnings/:wallet", async (req, res) => {
       referrals: "5% of each paid call made by referred agents",
     },
     note: "Earnings accumulate in your balance and are claimable via the platform wallet. Contact scriptmasterlabs@gmail.com to claim.",
+  });
+});
+
+// ─── TRAFFIC STATS ────────────────────────────────────────────────────────────
+
+/** GET /api/stats — live agent traffic counts. Free, CORS-open. */
+app.get("/api/stats", async (_req, res) => {
+  const agentTypes = ["claude", "gpt", "gemini", "perplexity", "grok", "python", "curl", "human", "bot", "unknown"];
+  const today = new Date().toISOString().slice(0, 10);
+
+  const [todayValues, totalValues] = await Promise.all([
+    redis.mget(agentTypes.map((t) => `traffic:day:${today}:${t}`)),
+    redis.mget(agentTypes.map((t) => `traffic:total:${t}`)),
+  ]);
+
+  const byTypeToday: Record<string, number> = {};
+  const byTypeTotal: Record<string, number> = {};
+  let todayTotal = 0;
+  let allTimeTotal = 0;
+
+  agentTypes.forEach((t, i) => {
+    const d = parseInt(todayValues[i] ?? "0", 10);
+    const a = parseInt(totalValues[i] ?? "0", 10);
+    byTypeToday[t] = d;
+    byTypeTotal[t] = a;
+    todayTotal += d;
+    allTimeTotal += a;
+  });
+
+  res.json({
+    today: { date: today, total: todayTotal, byType: byTypeToday },
+    allTime: { total: allTimeTotal, byType: byTypeTotal },
+    aiAgentsToday: (byTypeToday.claude ?? 0) + (byTypeToday.gpt ?? 0) + (byTypeToday.gemini ?? 0) + (byTypeToday.perplexity ?? 0) + (byTypeToday.grok ?? 0) + (byTypeToday.python ?? 0),
+    aiAgentsAllTime: (byTypeTotal.claude ?? 0) + (byTypeTotal.gpt ?? 0) + (byTypeTotal.gemini ?? 0) + (byTypeTotal.perplexity ?? 0) + (byTypeTotal.grok ?? 0) + (byTypeTotal.python ?? 0),
   });
 });
 

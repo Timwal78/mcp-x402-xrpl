@@ -220,6 +220,58 @@ const bureau = new CreditBureau(redis, {
 });
 const catalog = new ToolCatalog();
 
+// ─── x402 SPEC COMPLIANCE ─────────────────────────────────────────────────────
+//
+// The 402 responses below already carry a custom `requirements`/`acceptedPayments`
+// shape that SML's own agents (and any agent that reads paymentPlaybook's plain-
+// text instructions) can parse — that's how the real 0.5 USDC test payment got
+// paid manually. But it isn't the canonical x402 `PaymentRequirements` schema
+// (https://github.com/coinbase/x402), so a generic off-the-shelf x402 client
+// library — one that auto-negotiates payment from `accepts` without any custom
+// parsing — can't auto-pay against it. buildX402Accepts() adds that canonical
+// shape as an ADDITIONAL `accepts` array alongside the existing fields; nothing
+// that already depends on the old shape changes.
+//
+// XRPL/RLUSD has no official x402 network identifier (the spec is EVM/Solana-
+// native, "exact" scheme with atomic integer amounts) — its entry here is a
+// best-effort SML extension so XRPL-aware x402 clients can still parse it,
+// not a claim that XRPL is part of the formal spec.
+const USDC_BASE_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const RLUSD_XRPL_ISSUER = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De";
+
+function buildX402Accepts(price: string, resource: string, description: string) {
+  const usdcAtomicAmount = Math.round(parseFloat(price) * 1_000_000).toString();
+  return [
+    {
+      scheme: "exact",
+      network: "base",
+      maxAmountRequired: usdcAtomicAmount,
+      resource,
+      description,
+      mimeType: "application/json",
+      payTo: RECEIVING_ADDRESS_BASE,
+      maxTimeoutSeconds: 60,
+      asset: USDC_BASE_CONTRACT,
+      extra: { name: "USD Coin", symbol: "USDC", decimals: 6 },
+    },
+    {
+      scheme: "exact",
+      network: "xrpl-mainnet",
+      maxAmountRequired: price,
+      resource,
+      description,
+      mimeType: "application/json",
+      payTo: RECEIVING_ADDRESS,
+      maxTimeoutSeconds: 60,
+      asset: "RLUSD",
+      extra: {
+        issuer: RLUSD_XRPL_ISSUER,
+        note: "XRPL extension — not part of the base x402 spec's EVM-native amount encoding. maxAmountRequired is a plain decimal RLUSD value, not an atomic integer.",
+      },
+    },
+  ];
+}
+
 // Attach x402 client middleware (for agent-initiated payments flowing through)
 app.use(
   createX402Middleware({
@@ -862,6 +914,8 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
       vipEligible: score >= 700,
       requirements,
       acceptedPayments: [requirements, requirementsBase],
+      x402Version: 1,
+      accepts: buildX402Accepts(price, `${req.protocol}://${req.get("host")}${req.path}`, `SqueezeOS — ${price} (${agentTier}, score ${score})`),
       paymentPlaybook: {
         step1: `Get your exact discounted price (free): GET /x402/quote?tool=${toolIdGuess} — pass X-Agent-DID header`,
         step2a: `XRPL/RLUSD: fund your wallet at https://www.scriptmasterlabs.com/central-bank.html, then send ${price} RLUSD to ${RECEIVING_ADDRESS || "<RECEIVING_ADDRESS>"} on xrpl-mainnet (issuer: rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De)`,
@@ -1188,6 +1242,8 @@ function fixedPriceGate(price: string) {
             { currency: "RLUSD", network: "xrpl-mainnet", destination: RECEIVING_ADDRESS },
             { currency: "USDC", network: "base-mainnet", destination: RECEIVING_ADDRESS_BASE },
           ],
+          x402Version: 1,
+          accepts: buildX402Accepts(price, `${req.protocol}://${req.get("host")}${req.path}`, `SqueezeOS — ${price}`),
           instructions: `Send ${price} RLUSD to ${RECEIVING_ADDRESS} on XRPL mainnet, or ${price} USDC to ${RECEIVING_ADDRESS_BASE} on Base mainnet, then retry with X-Payment-Proof header.`,
           proofFormat: "base64(JSON.stringify({ txHash, payer })) — txHash format alone selects the chain: \"0x\"-prefixed = Base/USDC, no prefix = XRPL/RLUSD",
         });
@@ -1301,6 +1357,8 @@ function tieredPriceGate(basePrice: string, toolId: string) {
         vipEligible: score >= 700,
         requirements,
         acceptedPayments: [requirements, requirementsBase],
+        x402Version: 1,
+        accepts: buildX402Accepts(price, `${req.protocol}://${req.get("host")}${req.path}`, `SqueezeOS — ${toolId} — ${price} (${agentTier}, score ${score})`),
         exampleRetryHeaders: {
           "X-Payment-Proof": "<base64-encoded-proof>",
           "X-Agent-DID": "did:poi:xrpl:<your-xrpl-wallet>",

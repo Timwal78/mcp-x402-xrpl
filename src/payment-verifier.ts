@@ -116,8 +116,18 @@ export async function verifyRlusdPayment(
   }
 
   // ── 2. Replay prevention — Redis check before hitting XRPL ─────────────
+  // Fails OPEN on Redis errors: enableOfflineQueue:false means a Redis blip
+  // rejects immediately rather than hanging, and with no global Express
+  // error handler an uncaught rejection here would hang the request forever
+  // (indistinguishable from a dead server to the paying agent). A brief
+  // Redis outage should degrade replay-prevention, not block payment.
   const replayKey = `bureau:proof:${txHash}`;
-  const alreadyUsed = await redis.exists(replayKey);
+  let alreadyUsed = 0;
+  try {
+    alreadyUsed = await redis.exists(replayKey);
+  } catch (err) {
+    console.error(`[payment-verifier] Redis replay-check failed, failing open: ${String(err)}`);
+  }
   if (alreadyUsed) {
     return { valid: false, error: "proof_replayed: this txHash has already been used for payment" };
   }
@@ -186,7 +196,13 @@ export async function verifyRlusdPayment(
       const onChainPayer = String(tx["Account"] ?? "");
 
       // ── 7. Mark txHash as used (replay prevention) ──────────────────────
-      await redis.set(replayKey, onChainPayer, "EX", PROOF_REPLAY_TTL_SECONDS);
+      // Best-effort: a write failure here shouldn't fail a payment that
+      // already verified successfully on-chain.
+      try {
+        await redis.set(replayKey, onChainPayer, "EX", PROOF_REPLAY_TTL_SECONDS);
+      } catch (err) {
+        console.error(`[payment-verifier] Redis replay-write failed (payment still valid): ${String(err)}`);
+      }
 
       return {
         valid: true,
@@ -253,7 +269,12 @@ export async function verifyBaseUsdcPayment(
   }
 
   const replayKey = `bureau:proof:base:${txHash}`;
-  const alreadyUsed = await redis.exists(replayKey);
+  let alreadyUsed = 0;
+  try {
+    alreadyUsed = await redis.exists(replayKey);
+  } catch (err) {
+    console.error(`[payment-verifier] Redis replay-check failed, failing open: ${String(err)}`);
+  }
   if (alreadyUsed) {
     return { valid: false, error: "proof_replayed: this txHash has already been used for payment" };
   }
@@ -308,7 +329,11 @@ export async function verifyBaseUsdcPayment(
         };
       }
 
-      await redis.set(replayKey, payer, "EX", PROOF_REPLAY_TTL_SECONDS);
+      try {
+        await redis.set(replayKey, payer, "EX", PROOF_REPLAY_TTL_SECONDS);
+      } catch (err) {
+        console.error(`[payment-verifier] Redis replay-write failed (payment still valid): ${String(err)}`);
+      }
 
       return { valid: true, payer, amount: paidAmount.toFixed(6), txHash };
     } catch (err) {

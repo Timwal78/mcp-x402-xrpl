@@ -1,17 +1,31 @@
 /**
  * @scriptmasterlabs/mcp-x402
  *
- * payment-verifier.ts — On-chain RLUSD payment verification
+ * payment-verifier.ts — On-chain payment verification, XRPL/RLUSD + Base/USDC
  *
- * Decodes X-Payment-Proof, fetches the XRPL transaction, verifies:
+ * This used to be XRPL-only despite Base/USDC being advertised everywhere
+ * (sml_discover lists "base (USDC — preferred, <3s)" first) — any agent that
+ * paid in USDC on Base had a payment that succeeded on-chain but could never
+ * be verified, because verifyRlusdPayment rejected non-XRPL proofs and the
+ * server had no Base verification path at all. verifyPayment() below is the
+ * single entry point now: it looks at whether txHash has a "0x" prefix (EVM
+ * convention; XRPL hashes never do) and dispatches to the matching verifier.
+ *
+ * XRPL path — decodes X-Payment-Proof, fetches the XRPL transaction, verifies:
  *   - TransactionResult == tesSUCCESS
  *   - Destination == expected receiving address
  *   - Currency == RLUSD (hex or string form)
  *   - Issuer == canonical RLUSD issuer on XRPL mainnet
  *   - Amount >= expected amount
  *   - txHash not already used (replay prevention via Redis, 24 h window)
- *
  * Falls back across three XRPL cluster nodes before returning failure.
+ *
+ * Base path — fetches the transaction receipt via public Base RPC, verifies:
+ *   - receipt.status == success
+ *   - a USDC Transfer log exists with `to` == expected receiving address
+ *   - transferred amount (6 decimals) >= expected amount
+ *   - txHash not already used (replay prevention via Redis, 24 h window)
+ * Falls back across public Base RPC nodes before returning failure.
  */
 
 import { Client, convertStringToHex } from "xrpl";
@@ -26,6 +40,17 @@ const XRPL_NODES = [
   "wss://xrplcluster.com",
   "wss://s1.ripple.com",
   "wss://s2.ripple.com",
+];
+
+// Canonical native USDC contract on Base mainnet.
+const USDC_BASE_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+// keccak256("Transfer(address,address,uint256)") — the ERC-20 Transfer event topic0
+const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+const BASE_RPC_NODES = [
+  "https://mainnet.base.org",
+  "https://base.publicnode.com",
+  "https://base-rpc.publicnode.com",
 ];
 
 const PROOF_REPLAY_TTL_SECONDS = 86_400; // 24 h
@@ -177,6 +202,147 @@ export async function verifyRlusdPayment(
   }
 
   return { valid: false, error: lastError };
+}
+
+// ─── verifyBaseUsdcPayment ─────────────────────────────────────────────────────
+
+async function baseRpcCall(url: string, method: string, params: unknown[]): Promise<unknown> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const body = (await res.json()) as { result?: unknown; error?: unknown };
+  if (body.error) throw new Error(JSON.stringify(body.error));
+  return body.result;
+}
+
+/**
+ * Verify that a base64-encoded X-Payment-Proof header represents a valid,
+ * unspent USDC payment on Base mainnet to the expected destination.
+ *
+ * On success: marks the txHash as used in Redis (prevents replay).
+ * On failure: returns { valid: false, error: "<reason>" }.
+ *
+ * @param proofHeader    Raw value of X-Payment-Proof header (base64 JSON)
+ * @param expectedDest   Base (0x...) address that must appear as a USDC Transfer recipient
+ * @param expectedAmount Minimum USDC amount required (e.g. "0.10")
+ * @param redis          Ioredis client for replay prevention
+ */
+export async function verifyBaseUsdcPayment(
+  proofHeader: string,
+  expectedDest: string,
+  expectedAmount: string,
+  redis: Redis,
+): Promise<VerificationResult> {
+  let claim: PaymentProofClaim;
+  try {
+    const raw = Buffer.from(proofHeader, "base64").toString("utf8");
+    claim = JSON.parse(raw) as PaymentProofClaim;
+  } catch {
+    return { valid: false, error: "invalid_proof_encoding: cannot base64-decode or parse proof JSON" };
+  }
+
+  if (!claim.txHash || typeof claim.txHash !== "string") {
+    return { valid: false, error: "invalid_proof: missing txHash field" };
+  }
+
+  const txHash = claim.txHash.toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(txHash)) {
+    return { valid: false, error: `invalid_proof: not a valid Base/EVM tx hash: ${claim.txHash}` };
+  }
+
+  const replayKey = `bureau:proof:base:${txHash}`;
+  const alreadyUsed = await redis.exists(replayKey);
+  if (alreadyUsed) {
+    return { valid: false, error: "proof_replayed: this txHash has already been used for payment" };
+  }
+
+  const destLower = expectedDest.toLowerCase();
+  let lastError = "base_rpc_unreachable: all Base RPC nodes failed";
+
+  for (const url of BASE_RPC_NODES) {
+    try {
+      const receipt = await baseRpcCall(url, "eth_getTransactionReceipt", [txHash]) as
+        | { status?: string; logs?: Array<{ address: string; topics: string[]; data: string }> }
+        | null;
+
+      if (!receipt) {
+        lastError = `tx_not_found: ${txHash} not found on Base (via ${url})`;
+        continue;
+      }
+
+      if (receipt.status !== "0x1") {
+        return { valid: false, error: `tx_failed: Base tx status=${receipt.status ?? "unknown"}` };
+      }
+
+      let totalTransferred = 0n;
+      let payer = "";
+
+      for (const log of receipt.logs ?? []) {
+        if (String(log.address).toLowerCase() !== USDC_BASE_CONTRACT.toLowerCase()) continue;
+        if (!Array.isArray(log.topics) || log.topics[0] !== ERC20_TRANSFER_TOPIC0) continue;
+        if (log.topics.length < 3) continue;
+
+        const toAddr = `0x${String(log.topics[2]).slice(-40)}`;
+        if (toAddr.toLowerCase() !== destLower) continue;
+
+        const fromAddr = `0x${String(log.topics[1]).slice(-40)}`;
+        totalTransferred += BigInt(log.data);
+        payer = fromAddr;
+      }
+
+      if (totalTransferred === 0n) {
+        return {
+          valid: false,
+          error: `wrong_destination_or_currency: no USDC Transfer to ${expectedDest} found in tx ${txHash}`,
+        };
+      }
+
+      const paidAmount = Number(totalTransferred) / 1_000_000; // USDC has 6 decimals
+      const requiredAmount = parseFloat(expectedAmount);
+      if (Number.isNaN(paidAmount) || paidAmount < requiredAmount) {
+        return {
+          valid: false,
+          error: `insufficient_amount: paid ${paidAmount} USDC, required ${requiredAmount} USDC`,
+        };
+      }
+
+      await redis.set(replayKey, payer, "EX", PROOF_REPLAY_TTL_SECONDS);
+
+      return { valid: true, payer, amount: paidAmount.toFixed(6), txHash };
+    } catch (err) {
+      lastError = `base_rpc_error on ${url}: ${String(err)}`;
+    }
+  }
+
+  return { valid: false, error: lastError };
+}
+
+// ─── verifyPayment ──────────────────────────────────────────────────────────────
+
+/**
+ * Single entry point — dispatches to the XRPL or Base verifier based on the
+ * proof's txHash format. EVM/Base tx hashes are always "0x" + 64 hex chars;
+ * XRPL tx hashes never carry a "0x" prefix. This is checked on the raw,
+ * undecoded hash before either verifier's own normalization runs.
+ */
+export async function verifyPayment(
+  proofHeader: string,
+  destinations: { xrpl: string; base: string },
+  expectedAmount: string,
+  redis: Redis,
+): Promise<VerificationResult> {
+  const claim = decodeProofHeader(proofHeader);
+  if (!claim || !claim.txHash || typeof claim.txHash !== "string") {
+    return { valid: false, error: "invalid_proof: missing or unparseable txHash field" };
+  }
+
+  const isEvmHash = /^0x[0-9a-fA-F]{64}$/.test(claim.txHash);
+  if (isEvmHash) {
+    return verifyBaseUsdcPayment(proofHeader, destinations.base, expectedAmount, redis);
+  }
+  return verifyRlusdPayment(proofHeader, destinations.xrpl, expectedAmount, redis);
 }
 
 // ─── decodeProofHeader ────────────────────────────────────────────────────────

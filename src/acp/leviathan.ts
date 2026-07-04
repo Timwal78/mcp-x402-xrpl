@@ -36,6 +36,13 @@ const BYPASS_SECRET = process.env.LEVIATHAN_BYPASS_SECRET ?? "";
 const BASE_URL = (
   process.env.LEVIATHAN_BASE_URL ?? "https://mcp-x402.onrender.com"
 ).replace(/\/$/, "");
+// SqueezeOS signal endpoints (/api/signals/*) live on a separate host and
+// authenticate with X-API-Key (the SqueezeOS OPERATOR_API_KEY), not the
+// x402 bypass header used for the mcp-x402 federal-data routes.
+const SQUEEZEOS_BASE = (
+  process.env.SQUEEZEOS_API_BASE ?? "https://squeezeos-api.onrender.com"
+).replace(/\/$/, "");
+const SML_API_KEY = process.env.SML_API_KEY ?? "";
 
 // ─── OFFERINGS CATALOG ───────────────────────────────────────────────────────
 
@@ -44,121 +51,76 @@ interface Offering {
   description: string;
 }
 
+// Keys are the EXACT snake_case job names registered on the Virtuals ACP
+// marketplace — the seller matches session.job.description against these, so
+// they must be byte-for-byte identical to the registered "Job Name". Prices
+// mirror the registered price so budget negotiation matches. Only jobs backed
+// by a real, live backend route appear here; anything else would require
+// fabricating data, which is prohibited.
 export const OFFERINGS: Record<string, Offering> = {
-  // ── SqueezeOS Intelligence ─────────────────────────────────────────────────
-  "SqueezeOS Council (7-Agent AI)": {
+  // ── SqueezeOS proprietary signals (squeezeos-api.onrender.com, X-API-Key) ──
+  "squeezeos_council_7_agent_ai": {
     price: 0.10,
     description:
-      "Full 7-agent AI council verdict: QUANT_ALPHA, RISK_SENTINEL, MACRO_ORACLE, SENTIMENT_AI, " +
-      "CHAIN_ANALYST, VOLUME_HAWK, BREAKOUT_BOT. Req: { symbol: string }",
+      "Full 7-agent AI council verdict for an equity symbol. Req: { symbol: string }",
   },
-  "SqueezeOS BeastMode Full Scan": {
+  "squeezeos_beastmode_full_scan": {
     price: 0.10,
     description:
-      "Squeeze scan across 15m, 1h, 4h timeframes. Returns entry, target1, target2, stop-loss, R/R ratio. " +
+      "BeastMode multi-engine full scan for an equity symbol. Req: { symbol: string }",
+  },
+  "squeezeos_triple_lock_signal": {
+    price: 0.05,
+    description:
+      "SML Triple Lock three-engine consensus (LOCKED BULL / LOCKED BEAR / FORMING / UNLOCKED). " +
       "Req: { symbol: string }",
   },
-  "SqueezeOS Workflow Orchestrator": {
-    price: 0.20,
-    description:
-      "Multi-step workflow: market_intel | credit_check | full_scan. " +
-      "Req: { workflow: string, inputs?: object, budget_cap: string }",
-  },
-  "SqueezeOS Credit Report (ARGUS)": {
-    price: 0.10,
-    description:
-      "Full ARGUS credit bureau report: score history (20 events), tier, discount schedule, calls to next tier. " +
-      "Req: { agentDid: string }",
-  },
-  // ── Agent Infrastructure ───────────────────────────────────────────────────
-  "Agent Credit Score": {
-    price: 0.01,
-    description:
-      "Current ARGUS credit score (300–850) and tier for any agent DID. Req: { agentDid: string }",
-  },
-  "ARGUS JWT Credential": {
-    price: 0.01,
-    description:
-      "Signed JWT proving agent ARGUS score and tier — valid 1 hour. Req: { agentDid: string }",
-  },
-  "Agent Memory Write": {
-    price: 0.01,
-    description:
-      "Write a key-value pair to agent persistent Redis memory (30-day TTL). " +
-      "Req: { agentDid: string, key: string, value: string }",
-  },
-  "Agent Memory Read": {
-    price: 0,
-    description:
-      "Read a key from agent persistent memory. Req: { agentDid: string, key: string }",
-  },
-  "Alpha Mesh Signal Buy": {
+  "squeezeos_squeeze_signal_741_ema": {
     price: 0.02,
     description:
-      "Buy a live trading signal from the Alpha Mesh marketplace. Req: { signalId: string }",
+      "741-EMA stack alignment signal with squeeze_alert flag " +
+      "(BULLISH HIGHWAY / BEARISH HIGHWAY / CONSOLIDATION). Req: { symbol: string }",
   },
-  "Alpha Mesh Signal List": {
-    price: 0,
-    description: "Browse available signals on the Alpha Mesh marketplace. Req: {}",
-  },
-  // ── Federal Data Intelligence ──────────────────────────────────────────────
-  "Federal Grants Intel": {
+  "squeezeos_full_scanner": {
     price: 0.05,
     description:
-      "Live federal grants data from USASpending.gov. Req: { query: string, limit?: number }",
+      "Full composite signal — 741 + 365 + TripleLock in one verdict. Req: { symbol: string }",
   },
-  "Corporate Filings Search": {
-    price: 0.05,
-    description: "SEC EDGAR corporate filings search. Req: { query: string, type?: string }",
+  // ── Federal / regulatory data (mcp-x402 x402 routes, X-Leviathan-Key bypass) ─
+  "sec_insider_trade_intel": {
+    price: 0.20,
+    description: "SEC Form 4 insider trading activity for any ticker. Req: { ticker: string }",
   },
-  "Market Intelligence Feed": {
-    price: 0.05,
-    description: "Real-time market intelligence data feed. Req: { symbol: string }",
+  "sec_8k_real_time_filings": {
+    price: 0.25,
+    description: "Real-time SEC 8-K material event filings for any ticker. Req: { ticker: string }",
   },
-  "FDA Drug Label Lookup": {
-    price: 0.03,
-    description: "FDA drug label information via OpenFDA. Req: { drug: string }",
-  },
-  "FDA Drug Recall Alert": {
-    price: 0.03,
+  "fda_drug_recall_alert": {
+    price: 0.08,
     description:
-      "FDA drug recall enforcement reports via OpenFDA. Req: { drug?: string, limit?: number }",
+      "FDA drug recall enforcement reports via openFDA. Req: { drug: string, limit?: number }",
   },
-  "NPI Provider Lookup": {
-    price: 0.03,
-    description: "National Provider Identifier (NPI) registry lookup. Req: { query: string }",
-  },
-  "Clinical Trials Search": {
-    price: 0.05,
-    description:
-      "ClinicalTrials.gov study search. Req: { query: string, status?: string }",
-  },
-  "SEC Insider Trade Intel": {
-    price: 0.10,
-    description:
-      "SEC Form 4 insider trading activity for any ticker. Req: { ticker: string }",
-  },
-  "FDA Adverse Events Report": {
-    price: 0.03,
+  "fda_adverse_events_report": {
+    price: 0.08,
     description: "FDA FAERS adverse events for a drug. Req: { drug: string }",
   },
-  "SEC 8-K Real-Time Filings": {
-    price: 0.10,
+  "ai_fact_check": {
+    price: 0.15,
     description:
-      "Real-time SEC 8-K material event filings for any ticker. Req: { ticker: string }",
+      "Grounding oracle — fact-checks a claim against live government/FDA/SEC/Treasury data. " +
+      "Req: { claim: string, domain?: string }",
   },
-  "Treasury Yield Curve Data": {
-    price: 0.05,
-    description: "Current US Treasury yield curve (1M through 30Y). Req: {}",
-  },
-  "Entity Compliance Check": {
-    price: 0.08,
-    description: "OFAC sanctions and entity compliance screening. Req: { entity: string }",
-  },
-  "AI Fact Check": {
-    price: 0.05,
+  "entity_compliance_check": {
+    price: 0.35,
     description:
-      "AI-powered fact verification against live sources. Req: { claim: string }",
+      "SAM.gov registration status + exclusion flag + set-aside types + NAICS. " +
+      "Req: { uei: string } or { cage: string }",
+  },
+  "agent_credit_score": {
+    price: 0.20,
+    description:
+      "AI agent FICO-style reputation score (300–850). " +
+      "Req: { agent_id: string, action?: \"get\"|\"report\" }",
   },
 };
 
@@ -199,103 +161,77 @@ async function callBackend(
   return res.json();
 }
 
+// SqueezeOS signal endpoints — separate host, X-API-Key auth, symbol in path.
+async function callSqueezeOS(path: string): Promise<unknown> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (SML_API_KEY) headers["X-API-Key"] = SML_API_KEY;
+
+  const res = await fetch(`${SQUEEZEOS_BASE}${path}`, { headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "(unreadable body)");
+    throw new Error(`SqueezeOS GET ${path} → HTTP ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+// Ticker/symbol sanitizer for path segments.
+const sym = (v: string | number | undefined, fallback = "SPY"): string =>
+  (v !== undefined ? String(v) : fallback).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10) || fallback;
+
 async function routeOffering(offering: string, req: Requirement): Promise<unknown> {
   const str = (v: string | number | undefined, fallback = ""): string =>
     v !== undefined ? String(v) : fallback;
 
   switch (offering) {
-    case "SqueezeOS Council (7-Agent AI)":
-      return callBackend("POST", "/api/council", { symbol: str(req.symbol, "SPY") });
+    // ── SqueezeOS proprietary signals (squeezeos-api, X-API-Key) ─────────────
+    case "squeezeos_council_7_agent_ai":
+      return callBackend("POST", "/api/council", { symbol: sym(req.symbol) });
 
-    case "SqueezeOS BeastMode Full Scan":
-      return callBackend("POST", "/api/beastmode/full", { symbol: str(req.symbol, "SPY") });
+    case "squeezeos_beastmode_full_scan":
+      return callBackend("POST", "/api/beastmode/full", { symbol: sym(req.symbol) });
 
-    case "SqueezeOS Workflow Orchestrator":
-      return callBackend("POST", "/x402/orchestrate", {
-        workflow: str(req.workflow, "market_intel"),
-        inputs: req.inputs ?? {},
-        budget_cap: str(req.budget_cap, "0.20"),
-      });
+    case "squeezeos_triple_lock_signal":
+      return callSqueezeOS(`/api/signals/triplelock/${sym(req.symbol)}`);
 
-    case "SqueezeOS Credit Report (ARGUS)":
-      return callBackend("POST", "/api/credit-score/report", { agentDid: req.agentDid });
+    case "squeezeos_squeeze_signal_741_ema":
+      return callSqueezeOS(`/api/signals/741/${sym(req.symbol)}`);
 
-    case "Agent Credit Score":
-      return callBackend("GET", "/api/credit-score", undefined,
-        req.agentDid ? { agentDid: str(req.agentDid) } : undefined);
+    case "squeezeos_full_scanner":
+      return callSqueezeOS(`/api/signals/full/${sym(req.symbol)}`);
 
-    case "ARGUS JWT Credential":
-      return callBackend("GET", "/api/credit-score/verify", undefined,
-        req.agentDid ? { agentDid: str(req.agentDid) } : undefined);
+    // ── Federal / regulatory data (mcp-x402 x402 routes, bypass header) ──────
+    case "sec_insider_trade_intel":
+      return callBackend("GET", "/x402/insider-trades", undefined, { ticker: sym(req.ticker) });
 
-    case "Agent Memory Write":
-      return callBackend(
-        "PUT",
-        `/api/memory/${encodeURIComponent(str(req.key, "default"))}`,
-        { value: req.value },
-      );
+    case "sec_8k_real_time_filings":
+      return callBackend("GET", "/x402/sec-8k", undefined, { ticker: sym(req.ticker) });
 
-    case "Agent Memory Read":
-      return callBackend("GET",
-        `/api/memory/${encodeURIComponent(str(req.key, "default"))}`);
-
-    case "Alpha Mesh Signal Buy":
-      return callBackend("POST",
-        `/api/marketplace/buy/${encodeURIComponent(str(req.signalId))}`);
-
-    case "Alpha Mesh Signal List":
-      return callBackend("GET", "/api/marketplace");
-
-    case "Federal Grants Intel":
-      return callBackend("GET", "/x402/grants", undefined, {
-        query: str(req.query),
-        ...(req.limit ? { limit: str(req.limit) } : {}),
-      });
-
-    case "Corporate Filings Search":
-      return callBackend("GET", "/x402/firms", undefined, {
-        query: str(req.query),
-        ...(req.type ? { type: str(req.type) } : {}),
-      });
-
-    case "Market Intelligence Feed":
-      return callBackend("GET", "/x402/market", undefined, { symbol: str(req.symbol) });
-
-    case "FDA Drug Label Lookup":
-      return callBackend("GET", "/x402/drug-label", undefined, { drug: str(req.drug) });
-
-    case "FDA Drug Recall Alert":
+    case "fda_drug_recall_alert":
       return callBackend("GET", "/x402/drug-recall", undefined, {
-        ...(req.drug ? { drug: str(req.drug) } : {}),
+        drug: str(req.drug),
         ...(req.limit ? { limit: str(req.limit) } : {}),
       });
 
-    case "NPI Provider Lookup":
-      return callBackend("GET", "/x402/npi", undefined, { query: str(req.query) });
-
-    case "Clinical Trials Search":
-      return callBackend("GET", "/x402/clinical-trials", undefined, {
-        query: str(req.query),
-        ...(req.status ? { status: str(req.status) } : {}),
-      });
-
-    case "SEC Insider Trade Intel":
-      return callBackend("GET", "/x402/insider-trades", undefined, { ticker: str(req.ticker) });
-
-    case "FDA Adverse Events Report":
+    case "fda_adverse_events_report":
       return callBackend("GET", "/x402/drug-adverse-events", undefined, { drug: str(req.drug) });
 
-    case "SEC 8-K Real-Time Filings":
-      return callBackend("GET", "/x402/sec-8k", undefined, { ticker: str(req.ticker) });
+    case "ai_fact_check":
+      return callBackend("GET", "/x402/fact-check", undefined, {
+        claim: str(req.claim),
+        ...(req.domain ? { domain: str(req.domain) } : {}),
+      });
 
-    case "Treasury Yield Curve Data":
-      return callBackend("GET", "/x402/treasury-yields");
+    case "entity_compliance_check":
+      return callBackend("GET", "/x402/entity-compliance", undefined, {
+        ...(req.uei ? { uei: str(req.uei) } : {}),
+        ...(req.cage ? { cage: str(req.cage) } : {}),
+      });
 
-    case "Entity Compliance Check":
-      return callBackend("GET", "/x402/entity-compliance", undefined, { entity: str(req.entity) });
-
-    case "AI Fact Check":
-      return callBackend("GET", "/x402/fact-check", undefined, { claim: str(req.claim) });
+    case "agent_credit_score":
+      return callBackend("GET", "/x402/agent-score", undefined, {
+        agent_id: str(req.agent_id ?? req.agentDid),
+        ...(req.action ? { action: str(req.action) } : {}),
+      });
 
     default:
       throw new Error(`Unknown offering: ${offering}`);
@@ -317,11 +253,27 @@ function extractRequirement(session: JobSession): Requirement {
 
 // ─── ENTRY HANDLER ───────────────────────────────────────────────────────────
 
+// Resolve the Virtuals job name to an OFFERINGS key. Exact match first (the
+// registered names are clean snake_case), then a case-insensitive fallback so
+// a minor casing drift on the marketplace side still routes instead of rejects.
+function resolveOffering(raw: string): string | undefined {
+  if (OFFERINGS[raw]) return raw;
+  const norm = raw.trim().toLowerCase();
+  for (const key of Object.keys(OFFERINGS)) {
+    if (key.toLowerCase() === norm) return key;
+  }
+  return undefined;
+}
+
 async function handleEntry(session: JobSession, entry: JobRoomEntry): Promise<void> {
   if (entry.kind === "system") {
     switch (entry.event.type) {
       case "job.funded": {
-        const offering = session.job?.description ?? "";
+        const offering = resolveOffering(session.job?.description ?? "");
+        if (!offering) {
+          await session.reject(`LEVIATHAN does not offer: ${session.job?.description ?? ""}`);
+          break;
+        }
         const requirement = extractRequirement(session);
         try {
           const result = await routeOffering(offering, requirement);
@@ -337,12 +289,12 @@ async function handleEntry(session: JobSession, entry: JobRoomEntry): Promise<vo
 
   if (entry.kind === "message" && entry.contentType === "requirement" && session.status === "open") {
     const msgEntry = entry as AgentMessage;
-    const offering = session.job?.description ?? "";
-    const spec = OFFERINGS[offering];
-    if (!spec) {
-      await session.reject(`LEVIATHAN does not offer: ${offering}`);
+    const offering = resolveOffering(session.job?.description ?? "");
+    if (!offering) {
+      await session.reject(`LEVIATHAN does not offer: ${session.job?.description ?? ""}`);
       return;
     }
+    const spec = OFFERINGS[offering]!;
     if (spec.price > 0) {
       await session.setBudget(AssetToken.usdc(spec.price, session.chainId));
     }
@@ -376,11 +328,19 @@ export async function startLeviathan(): Promise<void> {
 
   seller.on("entry", handleEntry);
 
+  if (!SML_API_KEY) {
+    console.warn(
+      "[LEVIATHAN] SML_API_KEY is not set — squeezeos_* signal jobs will fail auth"
+    );
+  }
+
   await seller.start(() => {
-    console.log("LEVIATHAN online — 23 offerings on Virtuals ACP marketplace");
-    console.log(`  wallet : ${WALLET_ADDRESS}`);
-    console.log(`  backend: ${BASE_URL}`);
-    console.log(`  bypass : ${BYPASS_SECRET ? "configured" : "WARNING: not set"}`);
+    console.log(`LEVIATHAN online — ${Object.keys(OFFERINGS).length} offerings on Virtuals ACP marketplace`);
+    console.log(`  wallet  : ${WALLET_ADDRESS}`);
+    console.log(`  backend : ${BASE_URL}`);
+    console.log(`  squeeze : ${SQUEEZEOS_BASE}`);
+    console.log(`  bypass  : ${BYPASS_SECRET ? "configured" : "WARNING: not set"}`);
+    console.log(`  apikey  : ${SML_API_KEY ? "configured" : "WARNING: not set"}`);
   });
 }
 

@@ -125,10 +125,21 @@ export class CreditBureau {
     return this.redis.lrange(this.key("history", agentDid), 0, HISTORY_MAX - 1);
   }
 
-  /** Return the current score for an agent DID (default 300 if unseen). */
+  /**
+   * Return the current score for an agent DID (default 300 if unseen).
+   * Fails open to SCORE_INITIAL on Redis errors: this is called from the
+   * payment-gate hot path before proof verification even begins, so an
+   * uncaught rejection here would hang every paid request during a Redis
+   * blip instead of just falling back to base pricing.
+   */
   async getScore(agentDid: string): Promise<number> {
-    const raw = await this.redis.get(this.key("score", agentDid));
-    return raw !== null ? Number(raw) : SCORE_INITIAL;
+    try {
+      const raw = await this.redis.get(this.key("score", agentDid));
+      return raw !== null ? Number(raw) : SCORE_INITIAL;
+    } catch (err) {
+      console.error(`[credit-bureau] Redis getScore failed, failing open to ${SCORE_INITIAL}: ${String(err)}`);
+      return SCORE_INITIAL;
+    }
   }
 
   /**

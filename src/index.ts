@@ -29,7 +29,7 @@ export type { ToolDefinition, ToolCatalogManifest, ToolPricing } from "./tool-ca
 export { createOrchestrateHandler, WORKFLOWS } from "./orchestrate.js";
 export type { OrchestrateRequest, OrchestrateHandlerOptions } from "./orchestrate.js";
 
-export { verifyRlusdPayment, decodeProofHeader } from "./payment-verifier.js";
+export { verifyRlusdPayment, verifyBaseUsdcPayment, verifyPayment, decodeProofHeader } from "./payment-verifier.js";
 export type { PaymentProofClaim, VerificationResult } from "./payment-verifier.js";
 
 export { startLeviathan, OFFERINGS } from "./acp/leviathan.js";

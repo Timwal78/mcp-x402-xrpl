@@ -38,7 +38,7 @@ import {
 import { createOrchestrateHandler } from "./orchestrate.js";
 import { CreditBureau } from "./credit-bureau.js";
 import { ToolCatalog } from "./tool-catalog.js";
-import { verifyRlusdPayment } from "./payment-verifier.js";
+import { verifyPayment } from "./payment-verifier.js";
 import { fetchEquityCloses, fetchOptionsChainSnapshot, type EquityTimeframe } from "./market-data.js";
 import { computeRSI } from "./indicators.js";
 import { blackScholesDelta } from "./greeks.js";
@@ -51,6 +51,15 @@ const PORT = process.env.PORT ?? 3402;
 const RECEIVING_ADDRESS = process.env.XRPL_RECEIVING_ADDRESS ?? "";
 const WALLET_SEED = process.env.XRPL_WALLET_SEED ?? "";
 const NETWORK = (process.env.XRPL_NETWORK ?? "xrpl-mainnet") as "xrpl-mainnet" | "xrpl-testnet";
+/**
+ * Base mainnet address that receives x402 USDC payments — the same address
+ * published as "pay_to_wallet" in the public agent manifest. Payments here
+ * were previously unverifiable: the only verifier in this file was XRPL-only,
+ * so an agent paying USDC on Base (the chain advertised as "preferred") could
+ * never pass payment_verification_failed no matter how correct their payment
+ * was. See payment-verifier.ts verifyPayment().
+ */
+const RECEIVING_ADDRESS_BASE = process.env.BASE_RECEIVING_ADDRESS ?? "0x4e14B249D9A4c9c9352D780eCEB508A8eB7a7700";
 
 /**
  * URL of the upstream SqueezeOS Python intelligence server.
@@ -770,8 +779,15 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
   const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
 
   if (proofHeader) {
-    // Verify payment on-chain before granting access
-    const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
+    // Verify payment on-chain before granting access — auto-detects XRPL vs
+    // Base from the tx hash format, so a USDC-on-Base proof is no longer
+    // rejected just because this gate used to only know about XRPL/RLUSD.
+    const verification = await verifyPayment(
+      proofHeader,
+      { xrpl: RECEIVING_ADDRESS, base: RECEIVING_ADDRESS_BASE },
+      price,
+      redis,
+    );
     if (verification.valid) {
       // Attach verified payer to request for downstream use
       (req as Request & { verifiedPayer?: string }).verifiedPayer = verification.payer;
@@ -781,16 +797,20 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
     res.status(403)
       .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
       .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+      .setHeader("X-A2A-Receiving-Address-Base", RECEIVING_ADDRESS_BASE)
       .json({
         error: "payment_verification_failed",
         reason: verification.error,
         protocol: "x402/1.0",
-        note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches receiving address, RLUSD (not XRP), correct issuer, sufficient amount.",
+        note: "Your X-Payment-Proof header was rejected. See reason above. If you believe this is an error, check: correct txHash, destination matches the receiving address for that chain, correct currency (RLUSD on XRPL or USDC on Base), sufficient amount.",
         agentGuide: `${req.protocol}://${req.get("host")}/agent`,
-        receivingAddress: RECEIVING_ADDRESS,
+        receivingAddressXrpl: RECEIVING_ADDRESS,
+        receivingAddressBase: RECEIVING_ADDRESS_BASE,
         expectedAmount: price,
-        expectedCurrency: "RLUSD",
-        expectedNetwork: "xrpl-mainnet",
+        acceptedPayments: [
+          { currency: "RLUSD", network: "xrpl-mainnet", destination: RECEIVING_ADDRESS },
+          { currency: "USDC", network: "base-mainnet", destination: RECEIVING_ADDRESS_BASE },
+        ],
       });
     return;
   }
@@ -811,6 +831,14 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
     description: `SqueezeOS — ${price} RLUSD (${agentTier}, score ${score})`,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   };
+  const requirementsBase = {
+    destination: RECEIVING_ADDRESS_BASE,
+    amount: price,
+    currency: "USDC" as const,
+    network: "base-mainnet",
+    description: `SqueezeOS — ${price} USDC (${agentTier}, score ${score})`,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
 
   const encoded = Buffer.from(JSON.stringify(requirements)).toString("base64");
   res.status(402)
@@ -821,6 +849,7 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
     .setHeader("X-402-Amount", price)
     .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
     .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+    .setHeader("X-A2A-Receiving-Address-Base", RECEIVING_ADDRESS_BASE)
     .json({
       error: "payment_required",
       protocol: "x402/1.0",
@@ -832,13 +861,14 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
       agentTier,
       vipEligible: score >= 700,
       requirements,
+      acceptedPayments: [requirements, requirementsBase],
       paymentPlaybook: {
         step1: `Get your exact discounted price (free): GET /x402/quote?tool=${toolIdGuess} — pass X-Agent-DID header`,
-        step2: `Fund your XRPL wallet with RLUSD. Top-up: https://www.scriptmasterlabs.com/central-bank.html`,
-        step3: `Send ${price} RLUSD to ${RECEIVING_ADDRESS || "<RECEIVING_ADDRESS>"} on xrpl-mainnet (issuer: rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De)`,
-        step4: `Build proof: base64(JSON.stringify({ txHash: "<xrpl-tx-hash>", payer: "<your-wallet>", amount: "${price}", currency: "RLUSD", network: "xrpl-mainnet" }))`,
-        step5: `Retry this request with header: X-Payment-Proof: <base64-proof>`,
-        step6: `Include X-Idempotency-Key: <uuid> — replays free for 300 s, prevents double-charge on retry`,
+        step2a: `XRPL/RLUSD: fund your wallet at https://www.scriptmasterlabs.com/central-bank.html, then send ${price} RLUSD to ${RECEIVING_ADDRESS || "<RECEIVING_ADDRESS>"} on xrpl-mainnet (issuer: rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De)`,
+        step2b: `Base/USDC: send ${price} USDC (Base mainnet) to ${RECEIVING_ADDRESS_BASE}`,
+        step3: `Build proof: base64(JSON.stringify({ txHash: "<tx-hash>", payer: "<your-wallet>" })) — the txHash format alone tells the server which chain: "0x"-prefixed = Base/USDC, no prefix = XRPL/RLUSD`,
+        step4: `Retry this request with header: X-Payment-Proof: <base64-proof>`,
+        step5: `Include X-Idempotency-Key: <uuid> — replays free for 300 s, prevents double-charge on retry`,
       },
       exampleRetryHeaders: {
         "X-Payment-Proof":   "<base64-encoded-proof>",
@@ -1149,23 +1179,31 @@ function fixedPriceGate(price: string) {
       res.status(402)
         .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
         .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+        .setHeader("X-A2A-Receiving-Address-Base", RECEIVING_ADDRESS_BASE)
         .json({
           error: "payment_required",
           protocol: "x402/1.0",
           price,
-          currency: "RLUSD",
-          network: "xrpl-mainnet",
-          destination: RECEIVING_ADDRESS,
-          instructions: `Send ${price} RLUSD to ${RECEIVING_ADDRESS} on XRPL mainnet, then retry with X-Payment-Proof header.`,
-          proofFormat: "base64(JSON.stringify({ txHash, payer, amount, currency, network }))",
+          acceptedPayments: [
+            { currency: "RLUSD", network: "xrpl-mainnet", destination: RECEIVING_ADDRESS },
+            { currency: "USDC", network: "base-mainnet", destination: RECEIVING_ADDRESS_BASE },
+          ],
+          instructions: `Send ${price} RLUSD to ${RECEIVING_ADDRESS} on XRPL mainnet, or ${price} USDC to ${RECEIVING_ADDRESS_BASE} on Base mainnet, then retry with X-Payment-Proof header.`,
+          proofFormat: "base64(JSON.stringify({ txHash, payer })) — txHash format alone selects the chain: \"0x\"-prefixed = Base/USDC, no prefix = XRPL/RLUSD",
         });
       return;
     }
-    const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
+    const verification = await verifyPayment(
+      proofHeader,
+      { xrpl: RECEIVING_ADDRESS, base: RECEIVING_ADDRESS_BASE },
+      price,
+      redis,
+    );
     if (!verification.valid) {
       res.status(403)
         .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
         .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+        .setHeader("X-A2A-Receiving-Address-Base", RECEIVING_ADDRESS_BASE)
         .json({ error: "payment_verification_failed", reason: verification.error, expectedAmount: price });
       return;
     }
@@ -1194,7 +1232,12 @@ function tieredPriceGate(basePrice: string, toolId: string) {
     const proofHeader = req.headers["x-payment-proof"] as string | undefined;
 
     if (proofHeader) {
-      const verification = await verifyRlusdPayment(proofHeader, RECEIVING_ADDRESS, price, redis);
+      const verification = await verifyPayment(
+        proofHeader,
+        { xrpl: RECEIVING_ADDRESS, base: RECEIVING_ADDRESS_BASE },
+        price,
+        redis,
+      );
       if (verification.valid) {
         (req as Request & { verifiedPayer?: string }).verifiedPayer = verification.payer;
         next();
@@ -1203,13 +1246,16 @@ function tieredPriceGate(basePrice: string, toolId: string) {
       res.status(403)
         .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
         .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+        .setHeader("X-A2A-Receiving-Address-Base", RECEIVING_ADDRESS_BASE)
         .json({
           error: "payment_verification_failed",
           reason: verification.error,
           protocol: "x402/1.0",
           expectedAmount: price,
-          expectedCurrency: "RLUSD",
-          expectedNetwork: "xrpl-mainnet",
+          acceptedPayments: [
+            { currency: "RLUSD", network: "xrpl-mainnet", destination: RECEIVING_ADDRESS },
+            { currency: "USDC", network: "base-mainnet", destination: RECEIVING_ADDRESS_BASE },
+          ],
         });
       return;
     }
@@ -1224,6 +1270,14 @@ function tieredPriceGate(basePrice: string, toolId: string) {
       description: `SqueezeOS — ${toolId} — ${price} RLUSD (${agentTier}, score ${score})`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
+    const requirementsBase = {
+      destination: RECEIVING_ADDRESS_BASE,
+      amount: price,
+      currency: "USDC" as const,
+      network: "base-mainnet",
+      description: `SqueezeOS — ${toolId} — ${price} USDC (${agentTier}, score ${score})`,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
     const encoded = Buffer.from(JSON.stringify(requirements)).toString("base64");
 
     res.status(402)
@@ -1234,6 +1288,7 @@ function tieredPriceGate(basePrice: string, toolId: string) {
       .setHeader("X-402-Amount", price)
       .setHeader("X-A2A-Payment-Protocol", "x402/1.0")
       .setHeader("X-A2A-Receiving-Address", RECEIVING_ADDRESS)
+      .setHeader("X-A2A-Receiving-Address-Base", RECEIVING_ADDRESS_BASE)
       .json({
         error: "payment_required",
         protocol: "x402/1.0",
@@ -1245,6 +1300,7 @@ function tieredPriceGate(basePrice: string, toolId: string) {
         agentTier,
         vipEligible: score >= 700,
         requirements,
+        acceptedPayments: [requirements, requirementsBase],
         exampleRetryHeaders: {
           "X-Payment-Proof": "<base64-encoded-proof>",
           "X-Agent-DID": "did:poi:xrpl:<your-xrpl-wallet>",

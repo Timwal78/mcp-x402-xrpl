@@ -34,6 +34,13 @@ export interface PaymentRequirements {
   description?: string;
   /** ISO timestamp — proof must be submitted before this */
   expiresAt?: string;
+  /**
+   * Plain-text memo attached to the XRPL Payment transaction (MemoData).
+   * Required by counterparties that correlate payment to an invoice ID via
+   * memo rather than a return path (e.g. Ghost Layer's `memo_required` field
+   * on `POST /v1/notarize` — see ghost-layer/internal/x402/invoice.go).
+   */
+  memo?: string;
 }
 
 export interface PaymentProof {
@@ -189,6 +196,17 @@ export class XrplFacilitator {
       Destination: req.destination,
       Amount: amount,
       ...(req.destinationTag !== undefined ? { DestinationTag: req.destinationTag } : {}),
+      ...(req.memo
+        ? {
+            Memos: [
+              {
+                Memo: {
+                  MemoData: convertStringToHex(req.memo),
+                },
+              },
+            ],
+          }
+        : {}),
     };
 
     return tx;

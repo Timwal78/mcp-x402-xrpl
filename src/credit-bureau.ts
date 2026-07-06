@@ -264,7 +264,7 @@ export class CreditBureau {
 
       const { tx_blob } = wallet.sign(prepared);
       const response = await client.submitAndWait(tx_blob);
-      const txHash = String((response.result as Record<string, unknown>)["hash"] ?? "");
+      const txHash = String((response.result as unknown as Record<string, unknown>)["hash"] ?? "");
 
       if (txHash) {
         await this.redis.set(

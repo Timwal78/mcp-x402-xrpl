@@ -4,14 +4,24 @@
  * Everything a consumer needs is exported from this single file.
  */
 
-export { createX402Middleware, createPaymentGate, createQuoteHandler } from "./x402-middleware.js";
+export {
+  createX402Middleware,
+  createPaymentGate,
+  createDynamicPaymentGate,
+  createQuoteHandler,
+  computeDynamicAmount,
+  buildCanonicalX402Accepts,
+  sendPaymentRequired,
+} from "./x402-middleware.js";
 export type {
   X402MiddlewareOptions,
   PaymentGateOptions,
+  DynamicPaymentGateOptions,
   PaymentRequirements,
   PaymentProof,
   QuoteConfig,
   QuoteToolSpec,
+  CanonicalX402Accept,
 } from "./x402-middleware.js";
 
 export { XrplFacilitator } from "./xrpl-facilitator.js";
@@ -29,8 +39,24 @@ export type { ToolDefinition, ToolCatalogManifest, ToolPricing } from "./tool-ca
 export { createOrchestrateHandler, WORKFLOWS } from "./orchestrate.js";
 export type { OrchestrateRequest, OrchestrateHandlerOptions } from "./orchestrate.js";
 
-export { verifyRlusdPayment, verifyBaseUsdcPayment, verifyPayment, decodeProofHeader } from "./payment-verifier.js";
+export { verifyRlusdPayment, verifyBaseUsdcPayment, verifyPayment, decodeProofHeader, USDC_BASE_CONTRACT, RLUSD_ISSUER } from "./payment-verifier.js";
 export type { PaymentProofClaim, VerificationResult } from "./payment-verifier.js";
+
+export { GhostLayerClient } from "./ghost-layer-client.js";
+export type {
+  GhostLayerClientOptions,
+  GhostLayerStatus,
+  GhostLayerAttestationPubkey,
+  GhostLayerDecisionCertificate,
+  GhostLayerNotarizeReceipt,
+  NotarizeInput,
+  NotarizeProduct,
+} from "./ghost-layer-client.js";
+
+export { generateManifest, writeManifestFile } from "./manifest-generator.js";
+export type { VendingToolSpec, VendingToolPricing, VendingRouterManifest, GenerateManifestOptions } from "./manifest-generator.js";
+
+export { VENDING_TOOLS, NOTARIZE_PRICE, VEND_BASE_PRICE, VEND_PER_KB_PRICE, VEND_MAX_PRICE } from "./vending-tools-registry.js";
 
 export { startLeviathan, OFFERINGS } from "./acp/leviathan.js";
 

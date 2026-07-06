@@ -136,6 +136,29 @@ export class MarketplaceClient {
   }
 
   /**
+   * Ghost Exchange — the subset of marketplace_listings tagged for spot sale
+   * of compute capacity or intelligence/inference outputs ("compute" or
+   * "intelligence-exchange" category tags). Deliberately just a filtered
+   * view of the same real, payment-verified listings table — no separate
+   * order book, no derivatives/futures, no leverage, no anonymity beyond
+   * what the base marketplace already offers. Every listing here is a
+   * direct spot sale: pay the listed price, get the listed service.
+   */
+  async listExchangeListings(opts?: { limit?: number }): Promise<MarketplaceListing[]> {
+    const { data, error } = await this.client
+      .from("marketplace_listings")
+      .select("*")
+      .eq("status", "active")
+      .overlaps("category", ["compute", "intelligence-exchange"])
+      .order("is_scriptmasterlabs", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(opts?.limit ?? 200);
+
+    if (error) throw new Error(`[marketplace-client] listExchangeListings failed: ${error.message}`);
+    return (data as ListingRow[]).map(rowToListing);
+  }
+
+  /**
    * Inserts a new third-party listing. Caller is responsible for verifying
    * the listing fee payment BEFORE calling this — this method does not
    * itself check payment, it only persists the row.

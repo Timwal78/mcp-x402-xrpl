@@ -127,7 +127,14 @@ export const VENDING_TOOLS: VendingToolSpec[] = [
         name: { type: "string", description: "Product/service name." },
         tagline: { type: "string" },
         description: { type: "string" },
-        category: { type: "array", items: { type: "string" } },
+        category: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Tag with 'compute' if you're spot-selling compute capacity, or 'intelligence-exchange' if you're " +
+            "selling inference/analysis output, to appear in exchange_browse. Both are direct spot sales — pay " +
+            "the listed price, get the listed service — no futures, no leverage, no reputation derivatives.",
+        },
         base_url: { type: "string", description: "Your service's base URL." },
         endpoint: { type: "string", description: "The specific paid (or free) route being listed." },
         method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
@@ -140,5 +147,22 @@ export const VENDING_TOOLS: VendingToolSpec[] = [
       },
     },
     tags: ["marketplace", "listing", "paid", "agent-economy", "third-party"],
+  },
+  {
+    id: "exchange_browse",
+    name: "Ghost Exchange — Compute & Intelligence Listings",
+    description:
+      "A curated view of the Agentic Marketplace, filtered to direct spot sales of compute capacity ('compute' " +
+      "category) and inference/analysis output ('intelligence-exchange' category) — an agent buying GPU time or " +
+      "a model's output pays the listed price and receives the listed service, full stop. No futures, no " +
+      "leverage, no reputation derivatives, no anonymity beyond the base marketplace. ScriptMasterLabs' own Ghost " +
+      "Layer Decision Notary is the flagship intelligence-exchange listing: mint a real cryptographic attestation " +
+      "of any inference output without exposing the model or methodology behind it. Always free to browse.",
+    endpoint: "/exchange",
+    method: "GET",
+    recommended: true,
+    free: true,
+    inputSchema: { type: "object", properties: {} },
+    tags: ["marketplace", "exchange", "compute", "intelligence", "discovery", "free"],
   },
 ];

@@ -114,6 +114,44 @@ app.get("/.well-known/manifest.json", (_req, res) => {
   );
 });
 
+// GET /.well-known/agents.json — matches the schema squeezeos-api and
+// ghost-layer already serve at this same well-known path, so a crawler that
+// already knows how to read one ScriptMasterLabs service's agents.json can
+// read this one too. Built directly from VENDING_TOOLS — the same registry
+// the MCP server and manifest.json use — so this can't drift from either.
+app.get("/.well-known/agents.json", (_req, res) => {
+  res.json({
+    schema_version: "1.0",
+    name: "ScriptMaster Agentic Vending Router",
+    description:
+      "x402-gated vending stack for AI agents: dynamic-priced payload vending (base + per-KB), and a resale of " +
+      "Ghost Layer's real Xahau decision-notarization service that needs no XRPL wallet on the caller's side. " +
+      "Base/USDC is the primary settlement rail, XRPL/RLUSD is secondary. Part of the ScriptMasterLabs ecosystem.",
+    url: PUBLIC_BASE_URL,
+    homepage: "https://www.scriptmasterlabs.com",
+    payment_required: true,
+    payment_protocol: "x402",
+    payment_settlement: ["base", "xrpl-mainnet"],
+    payment_asset: ["USDC", "RLUSD"],
+    payment_issuer_rlusd: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+    pay_to_base: BASE_RECEIVING_ADDRESS || undefined,
+    pay_to_xrpl: XRPL_RECEIVING_ADDRESS || undefined,
+    specs: {
+      mcp: `${PUBLIC_BASE_URL}/mcp`,
+      manifest: `${PUBLIC_BASE_URL}/.well-known/manifest.json`,
+    },
+    capabilities: VENDING_TOOLS.map((tool) => ({
+      id: tool.id,
+      name: tool.name,
+      endpoint: `${PUBLIC_BASE_URL}${tool.endpoint}`,
+      method: tool.method,
+      cost: tool.free ? "free" : tool.pricing?.amount,
+      currency: tool.free ? undefined : tool.pricing?.currency,
+      description: tool.description,
+    })),
+  });
+});
+
 // ── GET /ghost-layer/status — free ────────────────────────────────────────────
 app.get("/ghost-layer/status", async (_req: Request, res: Response) => {
   try {

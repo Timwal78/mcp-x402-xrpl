@@ -27,6 +27,7 @@
  */
 
 import express, { Request, Response } from "express";
+import cors from "cors";
 import Redis from "ioredis";
 import crypto from "crypto";
 import { z } from "zod";
@@ -107,6 +108,10 @@ const app = express();
 // without this, req.protocol always reports "http" even on an https:// call,
 // which leaked into the `resource` field of every 402 challenge below.
 app.set("trust proxy", 1);
+// Open CORS: this router is a public vending API meant to be reachable from
+// any agent, browser-based marketplace UI (scriptmasterlabs.com/marketplace.html),
+// or third-party integration — there's no session/cookie state to protect.
+app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/health", (_req, res) => {
@@ -274,6 +279,50 @@ app.post("/vend/dynamic", async (req: Request, res: Response) => {
   });
 });
 
+// Basic format/length validation for third-party listing submissions. The
+// 0.05 USDC/RLUSD listing fee is the primary anti-spam mechanism (a real,
+// verified on-chain payment per listing) — this just rejects obviously
+// malformed submissions before they're persisted, it's not a moderation queue.
+function validateListingSubmission(body: Record<string, unknown>): string | null {
+  const name = String(body.name ?? "");
+  if (name.length > 120) return "name must be 120 characters or fewer";
+
+  const tagline = body.tagline !== undefined ? String(body.tagline) : "";
+  if (tagline.length > 200) return "tagline must be 200 characters or fewer";
+
+  const description = body.description !== undefined ? String(body.description) : "";
+  if (description.length > 2000) return "description must be 2000 characters or fewer";
+
+  const baseUrl = String(body.base_url ?? "");
+  if (!/^https?:\/\/.+/i.test(baseUrl)) return "base_url must start with http:// or https://";
+
+  const endpoint = String(body.endpoint ?? "");
+  if (!endpoint.startsWith("/")) return "endpoint must start with /";
+
+  const cost = String(body.cost ?? "");
+  if (cost.toLowerCase() !== "free" && !/^\d+(\.\d+)?$/.test(cost)) {
+    return "cost must be a positive decimal number or the literal string 'free'";
+  }
+
+  if (body.method !== undefined && !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(String(body.method))) {
+    return "method must be one of GET, POST, PUT, PATCH, DELETE";
+  }
+
+  if (body.category !== undefined) {
+    if (!Array.isArray(body.category) || body.category.length > 10) {
+      return "category must be an array of at most 10 strings";
+    }
+  }
+
+  if (body.tags !== undefined) {
+    if (!Array.isArray(body.tags) || body.tags.length > 15) {
+      return "tags must be an array of at most 15 strings";
+    }
+  }
+
+  return null;
+}
+
 // ── GET /marketplace/listings — free, browse all listings ─────────────────────
 // ScriptMasterLabs listings sort first (default recommendation only — every
 // listing here, ScriptMasterLabs or third-party, is independently payable;
@@ -330,6 +379,12 @@ app.post("/marketplace/list", async (req: Request, res: Response) => {
       error: "missing_required_field",
       required: ["name", "base_url", "endpoint", "cost", "pay_to"],
     });
+    return;
+  }
+
+  const validationError = validateListingSubmission(body);
+  if (validationError) {
+    res.status(400).json({ error: "invalid_listing", reason: validationError });
     return;
   }
 

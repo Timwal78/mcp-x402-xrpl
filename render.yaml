@@ -38,3 +38,14 @@ services:
       # ecosystem per SqueezeOS/CLAUDE.md) rather than provisioning a new one.
       - key: REDIS_URL
         sync: false
+      # Marketplace persistence — Supabase project "SERP"
+      # (mkftltqjxeqejztzomzf), table public.marketplace_listings. The
+      # service_role key is required (bypasses RLS to write new listings
+      # after a verified listing-fee payment); the project URL is not
+      # secret but declared sync:false alongside it for consistency.
+      # Without both set, /marketplace/* routes return a clear
+      # marketplace_not_configured error instead of faking listings.
+      - key: SUPABASE_URL
+        value: "https://mkftltqjxeqejztzomzf.supabase.co"
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

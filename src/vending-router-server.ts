@@ -37,12 +37,14 @@ import { sendPaymentRequired, computeDynamicAmount } from "./x402-middleware.js"
 import { verifyPayment, type VerificationResult } from "./payment-verifier.js";
 import { GhostLayerClient, type GhostLayerNotarizeReceipt } from "./ghost-layer-client.js";
 import { generateManifest } from "./manifest-generator.js";
+import { MarketplaceClient } from "./marketplace-client.js";
 import {
   VENDING_TOOLS,
   NOTARIZE_PRICE,
   VEND_BASE_PRICE,
   VEND_PER_KB_PRICE,
   VEND_MAX_PRICE,
+  MARKETPLACE_LISTING_FEE,
 } from "./vending-tools-registry.js";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
@@ -74,6 +76,14 @@ redis.on("ready", () => {
 });
 
 const ghostLayer = new GhostLayerClient({ baseUrl: GHOST_LAYER_URL, walletSeed: TREASURY_WALLET_SEED });
+
+// Marketplace persistence — real Supabase Postgres, not in-memory (listings
+// must survive restarts/redeploys). Nullable: if not configured, marketplace
+// routes return a clear "not configured" error rather than faking listings.
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const marketplace =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? new MarketplaceClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
 
 // ─── Payment verification helper (real on-chain check, not presence-only) ─────
 
@@ -252,6 +262,89 @@ app.post("/vend/dynamic", async (req: Request, res: Response) => {
   });
 });
 
+// ── GET /marketplace/listings — free, browse all listings ─────────────────────
+// ScriptMasterLabs listings sort first (default recommendation only — every
+// listing here, ScriptMasterLabs or third-party, is independently payable;
+// an agent can read this list, skip ScriptMasterLabs entirely, and pay any
+// other lister instead).
+app.get("/marketplace/listings", async (req: Request, res: Response) => {
+  if (!marketplace) {
+    res.status(503).json({ error: "marketplace_not_configured" });
+    return;
+  }
+  try {
+    const category = typeof req.query.category === "string" ? req.query.category : undefined;
+    const listings = await marketplace.listListings({ category });
+    res.json({ count: listings.length, listings });
+  } catch (err) {
+    res.status(502).json({ error: "marketplace_query_failed", details: String(err) });
+  }
+});
+
+// ── POST /marketplace/list — paid, list a new product (yours or a third party's) ─
+app.post("/marketplace/list", async (req: Request, res: Response) => {
+  const proof = req.headers["x-payment-proof"] as string | undefined;
+  const description = `Marketplace listing fee — ${MARKETPLACE_LISTING_FEE} USDC/RLUSD (one-time)`;
+
+  if (!marketplace) {
+    res.status(503).json({ error: "marketplace_not_configured" });
+    return;
+  }
+
+  if (!proof) {
+    sendPaymentRequired(
+      res,
+      {
+        destination: XRPL_RECEIVING_ADDRESS,
+        baseDestination: BASE_RECEIVING_ADDRESS || undefined,
+        amount: MARKETPLACE_LISTING_FEE,
+        currency: "RLUSD",
+        description,
+      },
+      req
+    );
+    return;
+  }
+
+  const verification = await checkPayment(proof, { amount: MARKETPLACE_LISTING_FEE, description });
+  if (!verification.valid) {
+    res.status(402).json({ error: "payment_verification_failed", reason: verification.error });
+    return;
+  }
+
+  const body = req.body ?? {};
+  if (!body.name || !body.base_url || !body.endpoint || !body.cost || !body.pay_to) {
+    res.status(400).json({
+      error: "missing_required_field",
+      required: ["name", "base_url", "endpoint", "cost", "pay_to"],
+    });
+    return;
+  }
+
+  try {
+    const listing = await marketplace.submitListing({
+      name: body.name,
+      tagline: body.tagline,
+      description: body.description,
+      category: body.category,
+      baseUrl: body.base_url,
+      endpoint: body.endpoint,
+      method: body.method,
+      cost: body.cost,
+      currency: body.currency,
+      network: body.network,
+      payTo: body.pay_to,
+      tags: body.tags,
+      submittedByWallet: body.submitted_by_wallet ?? verification.payer,
+      listingFeeAmount: MARKETPLACE_LISTING_FEE,
+      listingFeeCurrency: "USDC or RLUSD",
+    });
+    res.json({ paidBy: verification.payer, listing });
+  } catch (err) {
+    res.status(502).json({ error: "listing_submit_failed", details: String(err) });
+  }
+});
+
 // ─── MCP JSON-RPC endpoint (official SDK, stateless) ──────────────────────────
 
 function buildMcpServer(): McpServer {
@@ -378,6 +471,106 @@ function buildMcpServer(): McpServer {
           },
         ],
       };
+    }
+  );
+
+  server.registerTool(
+    "marketplace_browse",
+    {
+      title: "Agentic Marketplace — Browse Listings",
+      description: VENDING_TOOLS[3].description,
+      inputSchema: {
+        category: z.string().optional().describe("Optional category filter (e.g. finance, agent-economy, defi)."),
+      },
+    },
+    async ({ category }) => {
+      if (!marketplace) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: "marketplace_not_configured" }) }],
+          isError: true,
+        };
+      }
+      try {
+        const listings = await marketplace.listListings({ category });
+        return { content: [{ type: "text", text: JSON.stringify({ count: listings.length, listings }) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: String(err) }) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    "marketplace_list",
+    {
+      title: "Agentic Marketplace — List Your API",
+      description: VENDING_TOOLS[4].description,
+      inputSchema: {
+        name: z.string(),
+        tagline: z.string().optional(),
+        description: z.string().optional(),
+        category: z.array(z.string()).optional(),
+        base_url: z.string(),
+        endpoint: z.string(),
+        method: z.string().optional(),
+        cost: z.string(),
+        currency: z.string().optional(),
+        network: z.string().optional(),
+        pay_to: z.string(),
+        tags: z.array(z.string()).optional(),
+        submitted_by_wallet: z.string().optional(),
+        payment_proof: z.string().optional(),
+      },
+    },
+    async (args) => {
+      if (!marketplace) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: "marketplace_not_configured" }) }],
+          isError: true,
+        };
+      }
+      const verification = await checkPayment(args.payment_proof, {
+        amount: MARKETPLACE_LISTING_FEE,
+        description: "marketplace_list",
+      });
+      if (!verification.valid) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "payment_required",
+                amount: MARKETPLACE_LISTING_FEE,
+                acceptedCurrencies: ["USDC (Base)", "RLUSD (XRPL)"],
+                destinationBase: BASE_RECEIVING_ADDRESS || undefined,
+                destinationXrpl: XRPL_RECEIVING_ADDRESS || undefined,
+                reason: verification.error,
+              }),
+            },
+          ],
+        };
+      }
+      try {
+        const listing = await marketplace.submitListing({
+          name: args.name,
+          tagline: args.tagline,
+          description: args.description,
+          category: args.category,
+          baseUrl: args.base_url,
+          endpoint: args.endpoint,
+          method: args.method,
+          cost: args.cost,
+          currency: args.currency,
+          network: args.network,
+          payTo: args.pay_to,
+          tags: args.tags,
+          submittedByWallet: args.submitted_by_wallet ?? verification.payer,
+          listingFeeAmount: MARKETPLACE_LISTING_FEE,
+          listingFeeCurrency: "USDC or RLUSD",
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ paidBy: verification.payer, listing }) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: String(err) }) }], isError: true };
+      }
     }
   );
 

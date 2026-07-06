@@ -434,6 +434,26 @@ app.post("/marketplace/list", async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /exchange — free, Ghost Exchange: compute + intelligence spot listings ─
+// A filtered view of the same real marketplace_listings table — every entry
+// here is a direct spot sale (pay the listed price, get the listed service).
+// Deliberately NOT a derivatives/futures market and NOT anonymous-by-design:
+// no leverage, no reputation shorting, no ephemeral/unaccountable listers.
+// Third parties list here the same way as the base marketplace, just tagged
+// "compute" or "intelligence-exchange" — see marketplace_list's category field.
+app.get("/exchange", async (_req: Request, res: Response) => {
+  if (!marketplace) {
+    res.status(503).json({ error: "marketplace_not_configured" });
+    return;
+  }
+  try {
+    const listings = await marketplace.listExchangeListings();
+    res.json({ count: listings.length, listings });
+  } catch (err) {
+    res.status(502).json({ error: "exchange_query_failed", details: String(err) });
+  }
+});
+
 // ─── MCP JSON-RPC endpoint (official SDK, stateless) ──────────────────────────
 
 function buildMcpServer(): McpServer {
@@ -657,6 +677,29 @@ function buildMcpServer(): McpServer {
           listingFeeCurrency: "USDC or RLUSD",
         });
         return { content: [{ type: "text", text: JSON.stringify({ paidBy: verification.payer, listing }) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: String(err) }) }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    "exchange_browse",
+    {
+      title: "Ghost Exchange — Compute & Intelligence Listings",
+      description: VENDING_TOOLS[5].description,
+      inputSchema: {},
+    },
+    async () => {
+      if (!marketplace) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: "marketplace_not_configured" }) }],
+          isError: true,
+        };
+      }
+      try {
+        const listings = await marketplace.listExchangeListings();
+        return { content: [{ type: "text", text: JSON.stringify({ count: listings.length, listings }) }] };
       } catch (err) {
         return { content: [{ type: "text", text: JSON.stringify({ error: String(err) }) }], isError: true };
       }

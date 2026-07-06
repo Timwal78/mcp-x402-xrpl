@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@supabase/supabase-js": "^2.47.10",
     "@virtuals-protocol/acp-node-v2": "^0.1.6",
     "express": "^4.19.2",
     "ioredis": "^5.4.1",

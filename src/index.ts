@@ -56,7 +56,10 @@ export type {
 export { generateManifest, writeManifestFile } from "./manifest-generator.js";
 export type { VendingToolSpec, VendingToolPricing, VendingRouterManifest, GenerateManifestOptions } from "./manifest-generator.js";
 
-export { VENDING_TOOLS, NOTARIZE_PRICE, VEND_BASE_PRICE, VEND_PER_KB_PRICE, VEND_MAX_PRICE } from "./vending-tools-registry.js";
+export { VENDING_TOOLS, NOTARIZE_PRICE, VEND_BASE_PRICE, VEND_PER_KB_PRICE, VEND_MAX_PRICE, MARKETPLACE_LISTING_FEE } from "./vending-tools-registry.js";
+
+export { MarketplaceClient } from "./marketplace-client.js";
+export type { MarketplaceListing, NewListingInput } from "./marketplace-client.js";
 
 export { startLeviathan, OFFERINGS } from "./acp/leviathan.js";
 

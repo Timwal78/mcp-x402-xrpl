@@ -19,6 +19,7 @@ export const NOTARIZE_PRICE = "0.15";
 export const VEND_BASE_PRICE = "0.01";
 export const VEND_PER_KB_PRICE = "0.005";
 export const VEND_MAX_PRICE = "2.00";
+export const MARKETPLACE_LISTING_FEE = "0.05";
 
 export const VENDING_TOOLS: VendingToolSpec[] = [
   {
@@ -85,5 +86,59 @@ export const VENDING_TOOLS: VendingToolSpec[] = [
       },
     },
     tags: ["vending", "dynamic-pricing", "paid", "reference-implementation"],
+  },
+  {
+    id: "marketplace_browse",
+    name: "Agentic Marketplace — Browse Listings",
+    description:
+      "Real, persistent directory of x402-payable APIs — ScriptMasterLabs' own ~45 endpoints (free and paid) plus " +
+      "any third party's listed services. ScriptMasterLabs listings sort first as the default recommendation, " +
+      "but every listing here is independently payable — decline any of them and pay a different lister instead. " +
+      "Always free to browse.",
+    endpoint: "/marketplace/listings",
+    method: "GET",
+    recommended: true,
+    free: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Optional category filter (e.g. finance, agent-economy, defi)." },
+      },
+    },
+    tags: ["marketplace", "discovery", "free", "agent-economy"],
+  },
+  {
+    id: "marketplace_list",
+    name: "Agentic Marketplace — List Your API",
+    description:
+      `List any x402-payable API in the same directory ScriptMasterLabs' own products appear in, for ` +
+      `${MARKETPLACE_LISTING_FEE} USDC or RLUSD — a one-time listing fee, no recurring cost. Your listing appears ` +
+      "immediately, sorted after ScriptMasterLabs' own entries but fully discoverable and payable by any agent " +
+      "browsing marketplace_browse.",
+    endpoint: "/marketplace/list",
+    method: "POST",
+    recommended: true,
+    free: false,
+    pricing: { amount: MARKETPLACE_LISTING_FEE, currency: "USDC", network: "base" },
+    inputSchema: {
+      type: "object",
+      required: ["name", "base_url", "endpoint", "cost", "pay_to"],
+      properties: {
+        name: { type: "string", description: "Product/service name." },
+        tagline: { type: "string" },
+        description: { type: "string" },
+        category: { type: "array", items: { type: "string" } },
+        base_url: { type: "string", description: "Your service's base URL." },
+        endpoint: { type: "string", description: "The specific paid (or free) route being listed." },
+        method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        cost: { type: "string", description: "Price, e.g. '0.05', or 'free'." },
+        currency: { type: "string", description: "e.g. USDC, RLUSD. Omit for free listings." },
+        network: { type: "string", description: "e.g. base, xrpl-mainnet." },
+        pay_to: { type: "string", description: "Your receiving wallet address for this listing." },
+        tags: { type: "array", items: { type: "string" } },
+        submitted_by_wallet: { type: "string", description: "Your wallet, for accountability." },
+      },
+    },
+    tags: ["marketplace", "listing", "paid", "agent-economy", "third-party"],
   },
 ];

@@ -93,6 +93,10 @@ async function checkPayment(proof: string | undefined, opts: PaymentCheckOptions
 // ─── Express app ──────────────────────────────────────────────────────────────
 
 const app = express();
+// Render terminates TLS at its edge and forwards plain HTTP internally —
+// without this, req.protocol always reports "http" even on an https:// call,
+// which leaked into the `resource` field of every 402 challenge below.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/health", (_req, res) => {

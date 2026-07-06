@@ -644,6 +644,25 @@ function buildMcpServer(): McpServer {
   return server;
 }
 
+// GET /mcp — friendly info summary for a human browser hitting this URL
+// directly (e.g. clicking a "Connect Agent" link). The real protocol only
+// speaks JSON-RPC over POST; this just tells a person that much instead of
+// a bare 404, matching the pattern squeezeos-api's own /mcp GET already uses.
+app.get("/mcp", (_req: Request, res: Response) => {
+  res.json({
+    protocol: "MCP JSON-RPC 2.0",
+    server: {
+      name: "scriptmaster-agentic-vending-router",
+      description:
+        "x402-gated vending stack for AI agents: dynamic-priced payload vending, Ghost Layer decision " +
+        "notarization resale, and a real multi-seller marketplace for x402-payable APIs.",
+      version: "1.0.0",
+    },
+    tools_count: VENDING_TOOLS.length,
+    tools_list: 'POST /mcp with {"method":"tools/list"}',
+  });
+});
+
 app.post("/mcp", async (req: Request, res: Response) => {
   const server = buildMcpServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

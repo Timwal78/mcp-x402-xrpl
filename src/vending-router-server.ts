@@ -37,7 +37,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { sendPaymentRequired, computeDynamicAmount } from "./x402-middleware.js";
 import { verifyPayment, type VerificationResult } from "./payment-verifier.js";
 import { GhostLayerClient, type GhostLayerNotarizeReceipt } from "./ghost-layer-client.js";
-import { generateManifest } from "./manifest-generator.js";
+import { generateManifest, generateOpenApiSpec } from "./manifest-generator.js";
 import { MarketplaceClient } from "./marketplace-client.js";
 import {
   VENDING_TOOLS,
@@ -121,6 +121,20 @@ app.get("/health", (_req, res) => {
 app.get("/.well-known/manifest.json", (_req, res) => {
   res.json(
     generateManifest({
+      baseUrl: PUBLIC_BASE_URL,
+      tools: VENDING_TOOLS,
+      baseReceivingAddress: BASE_RECEIVING_ADDRESS || undefined,
+      xrplReceivingAddress: XRPL_RECEIVING_ADDRESS || undefined,
+    })
+  );
+});
+
+// GET /openapi.json — x402scan's own discovery spec ranks OpenAPI-first
+// discovery above the /.well-known/x402 fan-out doc as "recommended," so this
+// is the primary discovery path a conformant crawler should find first.
+app.get("/openapi.json", (_req, res) => {
+  res.json(
+    generateOpenApiSpec({
       baseUrl: PUBLIC_BASE_URL,
       tools: VENDING_TOOLS,
       baseReceivingAddress: BASE_RECEIVING_ADDRESS || undefined,
@@ -643,6 +657,25 @@ function buildMcpServer(): McpServer {
 
   return server;
 }
+
+// GET /mcp — friendly info summary for a human browser hitting this URL
+// directly (e.g. clicking a "Connect Agent" link). The real protocol only
+// speaks JSON-RPC over POST; this just tells a person that much instead of
+// a bare 404, matching the pattern squeezeos-api's own /mcp GET already uses.
+app.get("/mcp", (_req: Request, res: Response) => {
+  res.json({
+    protocol: "MCP JSON-RPC 2.0",
+    server: {
+      name: "scriptmaster-agentic-vending-router",
+      description:
+        "x402-gated vending stack for AI agents: dynamic-priced payload vending, Ghost Layer decision " +
+        "notarization resale, and a real multi-seller marketplace for x402-payable APIs.",
+      version: "1.0.0",
+    },
+    tools_count: VENDING_TOOLS.length,
+    tools_list: 'POST /mcp with {"method":"tools/list"}',
+  });
+});
 
 app.post("/mcp", async (req: Request, res: Response) => {
   const server = buildMcpServer();

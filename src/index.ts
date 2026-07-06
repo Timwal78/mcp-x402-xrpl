@@ -53,7 +53,7 @@ export type {
   NotarizeProduct,
 } from "./ghost-layer-client.js";
 
-export { generateManifest, writeManifestFile } from "./manifest-generator.js";
+export { generateManifest, writeManifestFile, generateOpenApiSpec } from "./manifest-generator.js";
 export type { VendingToolSpec, VendingToolPricing, VendingRouterManifest, GenerateManifestOptions } from "./manifest-generator.js";
 
 export { VENDING_TOOLS, NOTARIZE_PRICE, VEND_BASE_PRICE, VEND_PER_KB_PRICE, VEND_MAX_PRICE, MARKETPLACE_LISTING_FEE } from "./vending-tools-registry.js";

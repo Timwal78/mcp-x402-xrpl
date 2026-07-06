@@ -128,3 +128,72 @@ export function writeManifestFile(path: string, opts: GenerateManifestOptions): 
   writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n", "utf8");
   return manifest;
 }
+
+// ─── generateOpenApiSpec ──────────────────────────────────────────────────────
+
+/**
+ * Builds a real OpenAPI 3.0 document describing this router's routes, with
+ * `x-payment-info` on every paid operation — the discovery method x402scan's
+ * own spec (docs/DISCOVERY.md) ranks as "recommended," ahead of the
+ * `/.well-known/x402` fan-out doc this router also serves ("compatibility").
+ * Built from the same VENDING_TOOLS registry as manifest.json/agents.json so
+ * it can't drift from what the live server actually serves.
+ *
+ * Free tools get `security: []` per the x402scan spec, so their crawler
+ * excludes them from payment-challenge probing instead of flagging them as
+ * broken paid routes.
+ */
+export function generateOpenApiSpec(opts: GenerateManifestOptions): Record<string, unknown> {
+  const baseUrl = (opts.baseUrl ?? "https://squeezeos-api.onrender.com").replace(/\/$/, "");
+  const paths: Record<string, unknown> = {};
+
+  for (const tool of opts.tools) {
+    const method = tool.method.toLowerCase();
+    const operation: Record<string, unknown> = {
+      summary: tool.name,
+      description: tool.description,
+      operationId: tool.id,
+      responses: {
+        "200": { description: "Success" },
+        "402": { description: "Payment required — see x-payment-info for pricing." },
+      },
+    };
+
+    if (tool.method === "POST") {
+      operation.requestBody = {
+        required: true,
+        content: { "application/json": { schema: tool.inputSchema } },
+      };
+    }
+
+    if (tool.free) {
+      // Excludes this route from x402scan's payment-challenge probing.
+      operation.security = [];
+    } else {
+      operation["x-payment-info"] = {
+        protocols: ["x402"],
+        price:
+          tool.id === "vend_dynamic"
+            ? { mode: "dynamic", currency: "USD", min: tool.pricing?.amount ?? "0.01", max: "2.00" }
+            : { mode: "fixed", currency: "USD", amount: tool.pricing?.amount ?? "0.00" },
+      };
+    }
+
+    const pathsEntry = (paths[tool.endpoint] ??= {}) as Record<string, unknown>;
+    pathsEntry[method] = operation;
+  }
+
+  return {
+    openapi: "3.0.3",
+    info: {
+      title: "ScriptMaster Agentic Vending Router",
+      version: opts.version ?? "1.0.0",
+      description:
+        "x402-gated vending stack for AI agents: dynamic-priced payload vending, Ghost Layer decision " +
+        "notarization resale, and a real multi-seller marketplace for x402-payable APIs. Base/USDC is the " +
+        "primary settlement rail (accepts[0] in every 402 challenge), XRPL/RLUSD is secondary.",
+    },
+    servers: [{ url: baseUrl }],
+    paths,
+  };
+}

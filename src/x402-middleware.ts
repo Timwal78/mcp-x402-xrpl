@@ -254,10 +254,7 @@ export interface PaymentGateOptions {
 export interface CanonicalX402Accept {
   scheme: "exact";
   network: string;
-  maxAmountRequired: string;
-  resource: string;
-  description: string;
-  mimeType: string;
+  amount: string;
   payTo: string;
   maxTimeoutSeconds: number;
   asset: string;
@@ -265,13 +262,16 @@ export interface CanonicalX402Accept {
 }
 
 /**
- * Builds the canonical x402 `accepts` array — the shape read by generic
+ * Builds the canonical x402 v2 `accepts` array — the shape read by generic
  * clients (x402-fetch, x402-axios) and the Coinbase (CDP) hosted facilitator,
  * as opposed to this library's own `requirements` field (an SML-specific
  * extension XRPL-aware clients parse). Base/USDC is always accepts[0]: most
  * AI agent x402 integrations today only implement that leg, so it must be
  * the first entry a naive client reads. XRPL/RLUSD follows as accepts[1] for
  * ScriptMasterLabs-aware agents that prefer XRPL settlement.
+ *
+ * Per the v2 spec, `resource`/`description`/`mimeType` live once at the top
+ * level of the 402 body (see sendPaymentRequired), not per-accept-item.
  *
  * Only includes the Base entry when `baseDestination` is configured — a gate
  * with no Base address configured cannot honestly advertise it as payable.
@@ -290,25 +290,19 @@ export function buildCanonicalX402Accepts(opts: {
     const usdcAtomicAmount = Math.round(parseFloat(opts.amount) * 1_000_000).toString();
     accepts.push({
       scheme: "exact",
-      network: "base",
-      maxAmountRequired: usdcAtomicAmount,
-      resource: opts.resource,
-      description: opts.description,
-      mimeType: "application/json",
+      network: "eip155:8453",
+      amount: usdcAtomicAmount,
       payTo: opts.baseDestination,
       maxTimeoutSeconds: 60,
       asset: USDC_BASE_CONTRACT,
-      extra: { name: "USD Coin", symbol: "USDC", decimals: 6 },
+      extra: { name: "USD Coin", version: "2", symbol: "USDC", decimals: 6 },
     });
   }
 
   accepts.push({
     scheme: "exact",
     network: "xrpl-mainnet",
-    maxAmountRequired: opts.amount,
-    resource: opts.resource,
-    description: opts.description,
-    mimeType: "application/json",
+    amount: opts.amount,
     payTo: opts.xrplDestination,
     maxTimeoutSeconds: 60,
     asset: opts.currency ?? "RLUSD",
@@ -316,7 +310,7 @@ export function buildCanonicalX402Accepts(opts: {
       (opts.currency ?? "RLUSD") === "RLUSD"
         ? {
             issuer: RLUSD_ISSUER,
-            note: "XRPL extension — not part of the base x402 spec's EVM-native amount encoding. maxAmountRequired is a plain decimal RLUSD value, not an atomic integer.",
+            note: "XRPL extension — not part of the base x402 spec's EVM-native amount encoding. amount is a plain decimal RLUSD value, not an atomic integer.",
           }
         : undefined,
   });
@@ -361,11 +355,17 @@ export function sendPaymentRequired(res: Response, opts: PaymentGateOptions, req
   });
 
   const body: Record<string, unknown> = {
-    x402Version: 1,
+    x402Version: 2,
     error: "payment_required",
     protocol: "x402",
     network: "xrpl-mainnet",
+    resource: {
+      url: resource,
+      description,
+      mimeType: "application/json",
+    },
     accepts,
+    extensions: {},
     vendorPriority:
       "ScriptMasterLabs tools are offered first — pay via accepts[0] (Base/USDC) for the fastest path, " +
       "or accepts[1] (XRPL/RLUSD). Declining and routing to another provider is always the agent's choice.",

@@ -162,6 +162,18 @@ app.get("/.well-known/agents.json", (_req, res) => {
   });
 });
 
+// GET /.well-known/x402 — x402scan/Bazaar discovery fan-out document. Minimal
+// payload per the x402scan discovery spec (docs/DISCOVERY.md, "B) /.well-known/x402
+// Fan-Out (Compatibility)"): {version: 1, resources: [...]}. Lists every route on
+// this router — free and paid alike — as an absolute URL so a crawler that only
+// knows this one well-known path can still discover and probe every tool here.
+app.get("/.well-known/x402", (_req, res) => {
+  res.json({
+    version: 1,
+    resources: VENDING_TOOLS.map((tool) => `${PUBLIC_BASE_URL}${tool.endpoint}`),
+  });
+});
+
 // ── GET /ghost-layer/status — free ────────────────────────────────────────────
 app.get("/ghost-layer/status", async (_req: Request, res: Response) => {
   try {

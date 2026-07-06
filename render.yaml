@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: scriptmaster-vending-router
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:vending-router
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: PORT
+        value: "3403"
+      - key: PUBLIC_BASE_URL
+        value: "https://scriptmaster-vending-router.onrender.com"
+      - key: GHOST_LAYER_URL
+        value: "https://ghost-layer.onrender.com"
+      # ── Receiving addresses — real wallets this service is paid into ────────
+      # XRPL_RECEIVING_ADDRESS: your XRPL address for RLUSD/XRP payments.
+      # BASE_RECEIVING_ADDRESS: your Base (0x...) address for USDC payments —
+      #   this is accepts[0] in every 402 challenge (see operator directive:
+      #   ~95% of AI agent x402 clients only speak Base/USDC).
+      - key: XRPL_RECEIVING_ADDRESS
+        sync: false
+      - key: BASE_RECEIVING_ADDRESS
+        sync: false
+      # XRPL_WALLET_SEED: funds ghost_layer_notarize's resale flow — this
+      # service pays Ghost Layer's own notary fee on the caller's behalf, so
+      # it needs real XRPL wallet with RLUSD/XRP balance to spend from.
+      # Without it, ghost_layer_notarize returns a clear notary_not_configured
+      # error instead of a fake receipt (see src/vending-router-server.ts).
+      - key: XRPL_WALLET_SEED
+        sync: false
+      # REDIS_URL: replay-prevention for payment proofs. Reuse the same
+      # instance already configured for squeezeos-api (shared across this
+      # ecosystem per SqueezeOS/CLAUDE.md) rather than provisioning a new one.
+      - key: REDIS_URL
+        sync: false

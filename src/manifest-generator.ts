@@ -192,6 +192,7 @@ export function generateOpenApiSpec(opts: GenerateManifestOptions): Record<strin
         "x402-gated vending stack for AI agents: dynamic-priced payload vending, Ghost Layer decision " +
         "notarization resale, and a real multi-seller marketplace for x402-payable APIs. Base/USDC is the " +
         "primary settlement rail (accepts[0] in every 402 challenge), XRPL/RLUSD is secondary.",
+      contact: { email: "scriptmasterlabs@gmail.com" },
     },
     servers: [{ url: baseUrl }],
     paths,

@@ -69,6 +69,7 @@
   },
   "files": [
     "dist/",
+    "public/",
     "schema.jsonld",
     ".well-known/",
     "llms.txt",

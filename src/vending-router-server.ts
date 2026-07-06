@@ -30,6 +30,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import Redis from "ioredis";
 import crypto from "crypto";
+import path from "path";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -116,6 +117,13 @@ app.use(express.json({ limit: "1mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", server: "scriptmaster-agentic-vending-router", uptimeSeconds: process.uptime() });
+});
+
+// Real ScriptMasterLabs favicon (same asset served by scriptmasterlabs.com),
+// not a placeholder — x402scan's ownership-verification pass looks for one
+// at the API root.
+app.get("/favicon.ico", (_req, res) => {
+  res.sendFile(path.resolve(process.cwd(), "public/favicon.ico"));
 });
 
 app.get("/.well-known/manifest.json", (_req, res) => {

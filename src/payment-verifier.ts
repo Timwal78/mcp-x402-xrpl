@@ -33,7 +33,7 @@ import type Redis from "ioredis";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const RLUSD_ISSUER = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De";
+export const RLUSD_ISSUER = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De";
 const RLUSD_HEX = convertStringToHex("RLUSD").padEnd(40, "0").toUpperCase();
 
 const XRPL_NODES = [
@@ -43,7 +43,7 @@ const XRPL_NODES = [
 ];
 
 // Canonical native USDC contract on Base mainnet.
-const USDC_BASE_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+export const USDC_BASE_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 // keccak256("Transfer(address,address,uint256)") — the ERC-20 Transfer event topic0
 const ERC20_TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
@@ -148,7 +148,7 @@ export async function verifyRlusdPayment(
         continue;
       }
 
-      const tx = txResponse.result as Record<string, unknown>;
+      const tx = (txResponse as unknown as { result: Record<string, unknown> }).result;
 
       // ── 4. Check tesSUCCESS ─────────────────────────────────────────────
       const meta = tx["meta"] as Record<string, unknown> | undefined;

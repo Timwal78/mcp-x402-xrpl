@@ -6,6 +6,10 @@ import "./SMLYieldBond.sol";
 /**
  * @title SMLYieldBondFactory
  * @notice Factory contract to deploy and index SMLYieldBond instances securely.
+ * @dev Every bond this factory deploys carries the same `protocolFeeBasisPoints` (0.5%) and the
+ * same on-chain compliance framing (see SMLYieldBond.INSTRUMENT_TYPE) — the factory does not offer
+ * a way to customize or waive either per-deployment, so the fee model and disclosure are uniform
+ * across every ASC that uses it, not a discretionary term negotiated per bond.
  */
 contract SMLYieldBondFactory {
     address public immutable protocolTreasury;

@@ -38,8 +38,31 @@ abstract contract ReentrancyGuard {
  * @notice Programmatic revenue-factoring contract for SML Autonomous Software Corporations.
  * @dev Non-custodial: this contract only ever holds funds mid-transaction (fund() -> _closeFunding(),
  * processRevenue() -> payout loop). It never retains a balance between calls by design.
+ *
+ * COMPLIANCE FRAMING (see INSTRUMENT_TYPE below) — this is deal terms encoded as code, not a
+ * legal opinion. Confirm the structure with securities counsel in your jurisdiction before any
+ * real investor deposits funds:
+ *  - Capped revenue-factoring / royalty agreement. Investors get no shares, no voting rights, and
+ *    no ownership interest in the operator's business, IP, or this contract's admin keys (it has none).
+ *  - Return is hard-capped at `repaymentCapMultiplier` (e.g. 11500 = 115% of principal). Once
+ *    `amountRepaid[investor] == maxRepayment`, that investor is paid nothing further by processRevenue().
+ *  - Each bond is a single, isolated agreement between its investors and its operator — this contract
+ *    does not pool capital across bonds or make investment decisions on anyone's behalf.
+ *  - Fully autonomous once deployed and funded: fund()/processRevenue() compute and route every split
+ *    without any human judgment call. The protocol operator (protocolTreasury) never touches investor
+ *    principal or the operator's revenue share — it only ever receives `protocolFeeBasisPoints` (set by
+ *    the factory, 0.5% here), paid automatically at funding close, identically on every bond.
  */
 contract SMLYieldBond is ReentrancyGuard {
+    /// @notice Machine- and human-readable instrument description, set once at deploy time so it's
+    /// visible to any block explorer or off-chain due-diligence tool without reading this source file.
+    /// This is disclosure, not a legal opinion — see the contract-level NatSpec above.
+    string public constant INSTRUMENT_TYPE =
+        "Capped revenue-factoring / royalty agreement. NOT equity. NOT a pooled investment fund. "
+        "No voting rights. No ownership interest. Return capped at repaymentCapMultiplier. "
+        "Non-custodial, autonomous execution - operator/protocol never hold funds between calls. "
+        "Not legal advice; consult securities counsel in your jurisdiction before investing.";
+
     address public immutable factory;
     address public immutable operator;
     address public immutable paymentToken;

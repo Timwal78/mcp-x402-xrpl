@@ -54,7 +54,17 @@ jobs:
         with:
           node-version: "22"
       - run: npm install
+      - name: Check Cloudflare credentials
+        id: cf_check
+        run: |
+          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] && [ -n "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID are not set on this repo yet, so the Worker deploy is being skipped rather than failed. See docs/SML_ASC_ARCHITECTURE.md for what's still required before this deploys for real."
+          fi
       - uses: cloudflare/wrangler-action@v3
+        if: steps.cf_check.outputs.configured == 'true'
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

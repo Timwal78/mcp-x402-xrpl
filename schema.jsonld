@@ -14,6 +14,18 @@
         "https://github.com/Timwal78/zeroquery-protocol",
         "https://www.wikidata.org/wiki/Q140478532"
       ],
+      "identifier": [
+        {
+          "@type": "PropertyValue",
+          "propertyID": "SAM.gov Unique Entity ID (UEI)",
+          "value": "G24VZA4RLMK3"
+        },
+        {
+          "@type": "PropertyValue",
+          "propertyID": "CAGE Code",
+          "value": "21U51"
+        }
+      ],
       "description": "Builder of autonomous AI agent infrastructure — x402 payment rails, MCP tooling, and GEO-first software for the agentic web."
     },
     {

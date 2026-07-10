@@ -1,0 +1,35 @@
+name: SML ASC — Manual Testnet Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm deploying SMLYieldBondFactory to Base Sepolia (testnet only — no real funds)'
+        required: true
+
+jobs:
+  deploy-testnet:
+    name: Deploy SMLYieldBondFactory to Base Sepolia (testnet)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'deploy'
+    defaults:
+      run:
+        working-directory: asc-contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run compile
+      - name: Deploy to Base Sepolia
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          PROTOCOL_TREASURY_ADDRESS: ${{ secrets.PROTOCOL_TREASURY_ADDRESS }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: npm run deploy:base-sepolia
+      - name: Upload deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-sepolia-deployment
+          path: asc-contracts/deployments/baseSepolia.json

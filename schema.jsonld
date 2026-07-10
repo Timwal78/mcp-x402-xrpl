@@ -11,7 +11,8 @@
         "https://github.com/Timwal78",
         "https://github.com/Timwal78/mcp-x402-xrpl",
         "https://github.com/Timwal78/ago-orchestrator",
-        "https://github.com/Timwal78/zeroquery-protocol"
+        "https://github.com/Timwal78/zeroquery-protocol",
+        "https://www.wikidata.org/wiki/Q140478532"
       ],
       "description": "Builder of autonomous AI agent infrastructure — x402 payment rails, MCP tooling, and GEO-first software for the agentic web."
     },
@@ -28,6 +29,7 @@
       "datePublished": "2025-06-01",
       "license": "https://opensource.org/licenses/Apache-2.0",
       "author": { "@id": "https://scriptmasterlabs.com/#org" },
+      "sameAs": ["https://www.wikidata.org/wiki/Q140478605"],
       "description": "x402 HTTP payment middleware for MCP servers. XRPL, Xahau, XAH, RLUSD settlement. Drop-in autonomous agent payment rails for machine-to-machine commerce. No custodians.",
       "keywords": [
         "mcp", "x402", "xrpl", "xahau", "xah", "rlusd", "http-402",

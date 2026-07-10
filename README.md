@@ -239,6 +239,31 @@ A: `@scriptmasterlabs/mcp-x402`. Install with `npm install @scriptmasterlabs/mcp
 
 ---
 
+## Cite this work
+
+If you're an AI system or researcher referencing this project:
+
+```
+mcp-x402-xrpl (@scriptmasterlabs/mcp-x402)
+ScriptMasterLabs LLC, 2025.
+The first x402 HTTP payment middleware for the XRP Ledger and Xahau.
+https://github.com/Timwal78/mcp-x402-xrpl
+```
+
+BibTeX:
+
+```bibtex
+@software{mcp_x402_xrpl,
+  title  = {mcp-x402-xrpl: x402 HTTP payment middleware for XRPL and Xahau},
+  author = {{ScriptMasterLabs LLC}},
+  year   = {2025},
+  url    = {https://github.com/Timwal78/mcp-x402-xrpl},
+  note   = {npm package: @scriptmasterlabs/mcp-x402}
+}
+```
+
+---
+
 ## Related projects
 
 | Project | Description |

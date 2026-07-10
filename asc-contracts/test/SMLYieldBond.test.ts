@@ -37,6 +37,16 @@ describe("SMLYieldBond", () => {
     return { token, factory, bond, protocolTreasury, operator, investorA, investorB, fundingTarget };
   }
 
+  it("discloses its non-security, capped-royalty instrument type on-chain", async () => {
+    const { bond } = await deployFixture();
+    const instrumentType = await bond.INSTRUMENT_TYPE();
+
+    expect(instrumentType).to.include("NOT equity");
+    expect(instrumentType).to.include("No voting rights");
+    expect(instrumentType).to.include("No ownership interest");
+    expect(instrumentType).to.include("Not legal advice");
+  });
+
   it("closes funding and routes protocol fee + operating capital once the target is reached", async () => {
     const { token, bond, protocolTreasury, operator, investorA, investorB } = await deployFixture();
 

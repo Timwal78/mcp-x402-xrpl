@@ -76,3 +76,9 @@ export type { EquityTimeframe, OptionContractSnapshot, OptionsChainSnapshot, Opt
 
 export { runSwarm, EQUITIES_SWARM_PERSONAS, OPTIONS_SWARM_PERSONAS } from "./ai-swarm.js";
 export type { SwarmPersona, SwarmMemberResult, SwarmResult, SwarmOptions } from "./ai-swarm.js";
+
+export { SMLAgentSwarmOrchestrator } from "./asc/SMLAgentSwarmOrchestrator.js";
+export type { AgentMessage, AgentMessageInput, AgentRole, CodePatch } from "./asc/SMLAgentSwarmOrchestrator.js";
+
+export { SMLGhostLegacyBridge } from "./bridges/SMLGhostLegacyBridge.js";
+export type { LegacyAction, LegacyQueryRequest, LegacyQueryResponse } from "./bridges/SMLGhostLegacyBridge.js";

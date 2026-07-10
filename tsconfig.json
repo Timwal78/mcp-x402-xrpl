@@ -15,5 +15,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "examples", "tests", "scripts", "src/squeezeos-server.ts", "src/vending-router-server.ts"]
+  "exclude": ["node_modules", "dist", "examples", "tests", "scripts", "src/squeezeos-server.ts", "src/vending-router-server.ts", "src/asc/worker-entry.ts", "src/asc/render-entry.ts"]
 }

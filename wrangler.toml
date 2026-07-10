@@ -1,0 +1,20 @@
+name = "sml-asc-orchestrator"
+main = "src/asc/worker-entry.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets are set with `wrangler secret put <NAME>` — never written here:
+#   BASE_RPC_URL             — Base mainnet/Base Sepolia RPC endpoint
+#   ORCHESTRATOR_PRIVATE_KEY — wallet the CFO agent uses to call processRevenue()
+#   BOND_CONTRACT_ADDRESS    — deployed SMLYieldBond address (see asc-contracts/deployments/*.json)
+#
+# NOTE: this Worker only serves POST /message (agent message routing +
+# on-chain payment). It does NOT serve the Ghost legacy bridge — Workers has
+# no child_process even under nodejs_compat. The bridge only runs on the
+# Render service defined in render.yaml (src/asc/render-entry.ts).

@@ -49,3 +49,39 @@ services:
         value: "https://mkftltqjxeqejztzomzf.supabase.co"
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+
+  # SML ASC orchestrator — CEO/CFO/CTO/QA message routing + the Ghost legacy
+  # bridge. This is the persistent-Node alternative to the Cloudflare Worker
+  # in wrangler.toml; unlike the Worker, this one can also serve
+  # /legacy-bridge since Render gives it a real filesystem + child_process.
+  - type: web
+    name: sml-asc-orchestrator
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:asc-orchestrator
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "3404"
+      # Base RPC endpoint the CFO agent uses to call SMLYieldBond.processRevenue().
+      - key: BASE_RPC_URL
+        sync: false
+      # Wallet the CFO agent signs processRevenue() calls with. Must be the
+      # `operator` address the target SMLYieldBond was funded under
+      # (asc-contracts/scripts/deploy.ts) — the contract reverts for any
+      # other caller.
+      - key: ORCHESTRATOR_PRIVATE_KEY
+        sync: false
+      # Deployed SMLYieldBond address for this ASC instance — comes from
+      # asc-contracts/deployments/<network>.json after running the
+      # corresponding npm run deploy:* script. Unset until a bond actually
+      # exists on-chain.
+      - key: BOND_CONTRACT_ADDRESS
+        sync: false
+      - key: LEGACY_BRIDGE_SANDBOX
+        value: "/opt/render/project/src/.sml-ghost-bridge-sandbox"

@@ -83,10 +83,12 @@ const SQUEEZEOS_INTERNAL_SECRET = process.env.SQUEEZEOS_INTERNAL_SECRET ?? "";
 const LEVIATHAN_BYPASS_SECRET = process.env.LEVIATHAN_BYPASS_SECRET ?? "";
 
 /**
- * Secret used to sign ARGUS verify JWTs. Set this to a strong random value in production.
- * Third-party APIs can call GET /api/credit-score/verify-jwt?token=<token> to validate agent scores.
+ * Secret used to sign ARGUS verify JWTs. No hardcoded default: this repo is
+ * public, so a fallback here would let anyone forge a signed proof claiming
+ * a top-tier ARGUS credit score. Endpoints that use this must check it's
+ * non-empty and fail closed (503) rather than sign/verify with "".
  */
-const ARGUS_JWT_SECRET = process.env.ARGUS_JWT_SECRET ?? "sml-argus-verify-secret-change-in-prod";
+const ARGUS_JWT_SECRET = process.env.ARGUS_JWT_SECRET ?? "";
 
 /** Marketplace signal price: 0.02 RLUSD per buy */
 const MARKETPLACE_SIGNAL_PRICE = "0.02";
@@ -1610,6 +1612,10 @@ app.post("/api/options/delta-heatmap/full", agentDidMiddleware, tieredPriceGate(
  * Free — no payment required. Agents use this to prove their credit standing to other services.
  */
 app.get("/api/credit-score/verify", agentDidMiddleware, async (req, res) => {
+  if (!ARGUS_JWT_SECRET) {
+    res.status(503).json({ error: "argus_jwt_not_configured", message: "ARGUS_JWT_SECRET is not set on this server." });
+    return;
+  }
   const agentDid = (req as Request & { agentDid: string }).agentDid;
   const score = await bureau.getScore(agentDid);
   const tier = bureau.getTier(score);
@@ -1651,6 +1657,10 @@ app.get("/api/credit-score/verify", agentDidMiddleware, async (req, res) => {
  * Returns the decoded payload if the signature is valid and the token is not expired.
  */
 app.get("/api/credit-score/verify-jwt", async (req, res) => {
+  if (!ARGUS_JWT_SECRET) {
+    res.status(503).json({ error: "argus_jwt_not_configured", message: "ARGUS_JWT_SECRET is not set on this server.", valid: false });
+    return;
+  }
   const token = req.query.token as string | undefined;
   if (!token) {
     res.status(400).json({ error: "missing_token", message: "Pass ?token=<argus-jwt>" });

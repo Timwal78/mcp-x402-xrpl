@@ -1,0 +1,60 @@
+name: SML ASC — Compile, Test, Deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "asc-contracts/**"
+      - "src/asc/**"
+      - "src/bridges/**"
+      - "wrangler.toml"
+      - ".github/workflows/asc-deploy.yml"
+  pull_request:
+    paths:
+      - "asc-contracts/**"
+      - "src/asc/**"
+      - "src/bridges/**"
+
+jobs:
+  contracts:
+    name: Compile & test Solidity contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: asc-contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run compile
+      - run: npm test
+
+  orchestrator:
+    name: Lint & typecheck SML orchestrator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npm test -- test/GhostBridge.test.ts
+
+  deploy:
+    name: Deploy orchestrator to Cloudflare Workers
+    needs: [contracts, orchestrator]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

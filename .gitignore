@@ -4,3 +4,9 @@ dist/
 .env
 .env.local
 *.log
+asc-contracts/node_modules/
+asc-contracts/artifacts/
+asc-contracts/cache/
+asc-contracts/typechain-types/
+asc-contracts/dist/
+.wrangler/

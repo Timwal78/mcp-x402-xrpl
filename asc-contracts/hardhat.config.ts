@@ -26,12 +26,15 @@ const config: HardhatUserConfig = {
       chainId: 11155111,
     },
     baseSepolia: {
-      url: process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org",
+      // `||` not `??`: GitHub Actions injects an unset secret referenced in a
+      // workflow's `env:` block as an empty string, not `undefined` — `??`
+      // would never fall through to the default in that case.
+      url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
       accounts,
       chainId: 84532,
     },
     base: {
-      url: process.env.BASE_MAINNET_RPC_URL ?? "https://mainnet.base.org",
+      url: process.env.BASE_MAINNET_RPC_URL || "https://mainnet.base.org",
       accounts,
       chainId: 8453,
     },

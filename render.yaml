@@ -1,1 +1,99 @@
-c2VydmljZXM6CiAgLSB0eXBlOiB3ZWIKICAgIG5hbWU6IHNjcmlwdG1hc3Rlci12ZW5kaW5nLXJvdXRlcgogICAgZW52OiBub2RlCiAgICBwbGFuOiBzdGFydGVyCiAgICByZWdpb246IG9yZWdvbgogICAgYnVpbGRDb21tYW5kOiBucG0gaW5zdGFsbCAmJiBucG0gcnVuIGJ1aWxkCiAgICBzdGFydENvbW1hbmQ6IG5wbSBydW4gc3RhcnQ6dmVuZGluZy1yb3V0ZXIKICAgIGhlYWx0aENoZWNrUGF0aDogL2hlYWx0aAogICAgYXV0b0RlcGxveTogdHJ1ZQogICAgZW52VmFyczoKICAgICAgLSBrZXk6IE5PREVfVkVSU0lPTgogICAgICAgIHZhbHVlOiAiMjIiCiAgICAgIC0ga2V5OiBQT1JUCiAgICAgICAgdmFsdWU6ICIzNDAzIgogICAgICAtIGtleTogUFVCTElDX0JBU0VfVVJMCiAgICAgICAgdmFsdWU6ICJodHRwczovL3NjcmlwdG1hc3Rlci12ZW5kaW5nLXJvdXRlci5vbnJlbmRlci5jb20iCiAgICAgIC0ga2V5OiBHSE9TVF9MQVlFUl9VUkwKICAgICAgICB2YWx1ZTogImh0dHBzOi8vZ2hvc3QtbGF5ZXIub25yZW5kZXIuY29tIgogICAgICAjIOKUgOKUgCBSZWNlaXZpbmcgYWRkcmVzc2VzIOKAlCByZWFsIHdhbGxldHMgdGhpcyBzZXJ2aWNlIGlzIHBhaWQgaW50byDilIDilIDilIDilIDilIDilIDilIDilIDilIAKICAgICAgIyBYUlBMX1JFQ0VJVklOR19BRERSRVNTOiB5b3VyIFhSUEwgYWRkcmVzcyBmb3IgUkxVU0QvWFJQIHBheW1lbnRzLgogICAgICAjIEJBU0VfUkVDRUlWSU5HX0FERFJFU1M6IHlvdXIgQmFzZSAoMHguLi4pIGFkZHJlc3MgZm9yIFVTREMgcGF5bWVudHMg4oCUCiAgICAgICMgICB0aGlzIGlzIGFjY2VwdHNbMF0gaW4gZXZlcnkgNDAyIGNoYWxsZW5nZSAoc2VlIG9wZXJhdG9yIGRpcmVjdGl2ZToKICAgICAgIyAgIH45NSUgb2YgQUkgYWdlbnQgeDQwMiBjbGllbnRzIG9ubHkgc3BlYWsgQmFzZS9VU0RDKS4KICAgICAgLSBrZXk6IFhSUExfUkVDRUlWSU5HX0FERFJFU1MKICAgICAgICBzeW5jOiBmYWxzZQogICAgICAtIGtleTogQkFTRV9SRUNFSVZJTkdfQUREUkVTUwogICAgICAgIHN5bmM6IGZhbHNlCiAgICAgICMgWFJQTF9XQUxMRVRfU0VFRDogZnVuZHMgZ2hvc3RfbGF5ZXJfbm90YXJpemUncyByZXNhbGUgZmxvdyDigJQgdGhpcwogICAgICAjIHNlcnZpY2UgcGF5cyBHaG9zdCBMYXllcidzIG93biBub3RhcnkgZmVlIG9uIHRoZSBjYWxsZXIncyBiZWhhbGYsIHNvCiAgICAgICMgaXQgbmVlZHMgcmVhbCBYUlBMIHdhbGxldCB3aXRoIFJMVVNEL1hSUCBiYWxhbmNlIHRvIHNwZW5kIGZyb20uCiAgICAgICMgV2l0aG91dCBpdCwgZ2hvc3RfbGF5ZXJfbm90YXJpemUgcmV0dXJucyBhIGNsZWFyIG5vdGFyeV9ub3RfY29uZmlndXJlZAogICAgICAjIGVycm9yIGluc3RlYWQgb2YgYSBmYWtlIHJlY2VpcHQgKHNlZSBzcmMvdmVuZGluZy1yb3V0ZXItc2VydmVyLnRzKS4KICAgICAgLSBrZXk6IFhSUExfV0FMTEVUX1NFRUQKICAgICAgICBzeW5jOiBmYWxzZQogICAgICAjIFJFRElTX1VSTDogcmVwbGF5LXByZXZlbnRpb24gZm9yIHBheW1lbnQgcHJvb2ZzLiBSZXVzZSB0aGUgc2FtZQogICAgICAjIGluc3RhbmNlIGFscmVhZHkgY29uZmlndXJlZCBmb3Igc3F1ZWV6ZW9zLWFwaSAoc2hhcmVkIGFjcm9zcyB0aGlzCiAgICAgICMgZWNvc3lzdGVtIHBlciBTcXVlZXplT1MvQ0xBVURFLm1kKSByYXRoZXIgdGhhbiBwcm92aXNpb25pbmcgYSBuZXcgb25lLgogICAgICAtIGtleTogUkVESVNfVVJMCiAgICAgICAgc3luYzogZmFsc2UKICAgICAgIyBNYXJrZXRwbGFjZSBwZXJzaXN0ZW5jZSDigJQgU3VwYWJhc2UgcHJvamVjdCAiU0VSUCIKICAgICAgIyAobWtmdGx0cWp4ZXFlanp0em9temYpLCB0YWJsZSBwdWJsaWMubWFya2V0cGxhY2VfbGlzdGluZ3MuIFRoZQogICAgICAjIHNlcnZpY2Vfcm9sZSBrZXkgaXMgcmVxdWlyZWQgKGJ5cGFzc2VzIFJMUyB0byB3cml0ZSBuZXcgbGlzdGluZ3MKICAgICAgIyBhZnRlciBhIHZlcmlmaWVkIGxpc3RpbmctZmVlIHBheW1lbnQpOyB0aGUgcHJvamVjdCBVUkwgaXMgbm90CiAgICAgICMgc2VjcmV0IGJ1dCBkZWNsYXJlZCBzeW5jOmZhbHNlIGFsb25nc2lkZSBpdCBmb3IgY29uc2lzdGVuY3kuCiAgICAgICMgV2l0aG91dCBib3RoIHNldCwgL21hcmtldHBsYWNlLyogcm91dGVzIHJldHVybiBhIGNsZWFyCiAgICAgICMgbWFya2V0cGxhY2Vfbm90X2NvbmZpZ3VyZWQgZXJyb3IgaW5zdGVhZCBvZiBmYWtpbmcgbGlzdGluZ3MuCiAgICAgIC0ga2V5OiBTVVBBQkFTRV9VUkwKICAgICAgICB2YWx1ZTogImh0dHBzOi8vbWtmdGx0cWp4ZXFlanp0em9temYuc3VwYWJhc2UuY28iCiAgICAgIC0ga2V5OiBTVVBBQkFTRV9TRVJWSUNFX1JPTEVfS0VZCiAgICAgICAgc3luYzogZmFsc2UKCiAgIyBOT1RFOiB0aGUgc21sLWFzYy1vcmNoZXN0cmF0b3IgUmVuZGVyIHNlcnZpY2UgaGFzIGJlZW4gZGVsaWJlcmF0ZWx5CiAgIyByZW1vdmVkIGZyb20gdGhpcyBmaWxlLiBBZGRpbmcgaXQgYmFjayB3aGlsZSB0aGlzIHJlcG8gaXMgYSBjb25uZWN0ZWQKICAjIFJlbmRlciBCbHVlcHJpbnQgd2lsbCBpbW1lZGlhdGVseSBwcm92aXNpb24gYSByZWFsLCBsaXZlIHNlcnZpY2UgLSBub3QKICAjIGp1c3QgZG9jdW1lbnQgaW50ZW50LiBPbmx5IHJlLWFkZCBpdCBvbmNlIEJBU0VfUlBDX1VSTCwKICAjIE9SQ0hFU1RSQVRPUl9QUklWQVRFX0tFWSwgYW5kIEJPTkRfQ09OVFJBQ1RfQUREUkVTUyBhcmUgYWN0dWFsbHkgcmVhZHkKICAjIHRvIGJlIHNldCAtIHNlZSBkb2NzL1NNTF9BU0NfQVJDSElURUNUVVJFLm1kJ3MgZGVwbG95IG9yZGVyLiBUaGUgc2VydmljZQogICMgY29kZSBpdHNlbGYgKHNyYy9hc2MvcmVuZGVyLWVudHJ5LnRzKSBzdGlsbCBleGlzdHMgYW5kIGlzIHVudG91Y2hlZC4K
+services:
+  - type: web
+    name: scriptmaster-vending-router
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:vending-router
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "3403"
+      - key: PUBLIC_BASE_URL
+        value: "https://scriptmaster-vending-router.onrender.com"
+      - key: GHOST_LAYER_URL
+        value: "https://ghost-layer.onrender.com"
+      # ── Receiving addresses — real wallets this service is paid into ─────────
+      # XRPL_RECEIVING_ADDRESS: your XRPL address for RLUSD/XRP payments.
+      # BASE_RECEIVING_ADDRESS: your Base (0x...) address for USDC payments —
+      #   this is accepts[0] in every 402 challenge (see operator directive:
+      #   ~95% of AI agent x402 clients only speak Base/USDC).
+      - key: XRPL_RECEIVING_ADDRESS
+        sync: false
+      - key: BASE_RECEIVING_ADDRESS
+        sync: false
+      # XRPL_WALLET_SEED: funds ghost_layer_notarize's resale flow — this
+      # service pays Ghost Layer's own notary fee on the caller's behalf, so
+      # it needs real XRPL wallet with RLUSD/XRP balance to spend from.
+      # Without it, ghost_layer_notarize returns a clear notary_not_configured
+      # error instead of a fake receipt (see src/vending-router-server.ts).
+      - key: XRPL_WALLET_SEED
+        sync: false
+      # REDIS_URL: replay-prevention for payment proofs. Reuse the same
+      # instance already configured for squeezeos-api (shared across this
+      # ecosystem per SqueezeOS/CLAUDE.md) rather than provisioning a new one.
+      - key: REDIS_URL
+        sync: false
+      # Marketplace persistence — Supabase project "SERP"
+      # (mkftltqjxeqejztzomzf), table public.marketplace_listings. The
+      # service_role key is required (bypasses RLS to write new listings
+      # after a verified listing-fee payment); the project URL is not
+      # secret but declared sync:false alongside it for consistency.
+      # Without both set, /marketplace/* routes return a clear
+      # marketplace_not_configured error instead of faking listings.
+      - key: SUPABASE_URL
+        value: "https://mkftltqjxeqejztzomzf.supabase.co"
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+  # SML ASC orchestrator — CEO/CFO/CTO/QA swarm for the deployed SMLYieldBond
+  # (0xFc04ee4c26fDB51CCe9A1A8266217d39DE872f08 on Base mainnet). This
+  # service now degrades gracefully instead of crash-looping when chain env
+  # vars are missing (see src/asc/render-entry.ts) — the previous version of
+  # this block was removed after it crash-looped in prod for exactly that
+  # reason. ASC_AUTONOMOUS is deliberately left unset here (defaults to
+  # false): that flag lets a real hot wallet move real money on an LLM's
+  # judgment with nobody approving each cycle, which is a meaningfully
+  # bigger step than "the service exists" — turn it on deliberately in the
+  # Render dashboard once you've watched message-triggered mode behave
+  # correctly first.
+  - type: web
+    name: sml-asc-orchestrator
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:asc-orchestrator
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "3404"
+      - key: BOND_CONTRACT_ADDRESS
+        value: "0xFc04ee4c26fDB51CCe9A1A8266217d39DE872f08"
+      # BASE_RPC_URL: fine to leave unset — defaults to the public
+      # https://mainnet.base.org in code if not set here either.
+      - key: BASE_RPC_URL
+        sync: false
+      # ORCHESTRATOR_PRIVATE_KEY: the same operator wallet used to deploy
+      # the bond (0x04FB17d1B0B25601755C8FE994c0d023137e1350) — this process
+      # needs to sign processRevenue() calls as that wallet. Real funds key;
+      # set only in the Render dashboard, never in this file.
+      - key: ORCHESTRATOR_PRIVATE_KEY
+        sync: false
+      # ANTHROPIC_API_KEY: BYOK for real LLM agent reasoning. Unset means
+      # deterministic (pattern-rule only) mode.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false
+      # ASC_AUTONOMOUS: leave unset/false until you've verified
+      # message-triggered mode works — see note above the service block.
+      - key: ASC_AUTONOMOUS
+        sync: false

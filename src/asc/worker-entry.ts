@@ -1,4 +1,5 @@
 import { SMLAgentSwarmOrchestrator, type AgentMessageInput } from "./SMLAgentSwarmOrchestrator.js";
+import { AnthropicAgentClient } from "./llm-agent.js";
 
 /**
  * Cloudflare Worker entry for the ASC orchestrator's message-routing +
@@ -6,6 +7,13 @@ import { SMLAgentSwarmOrchestrator, type AgentMessageInput } from "./SMLAgentSwa
  * SMLGhostLegacyBridge — Workers has no child_process, even with
  * `nodejs_compat`, so the legacy bridge can only run on the Render/Node
  * entry point (see src/asc/render-entry.ts).
+ *
+ * Message-triggered BYOK LLM mode (set ANTHROPIC_API_KEY as a Worker secret)
+ * works fine here, since it's just an API call per request. The always-on
+ * autonomous CEO loop does NOT work here — Workers don't keep a process
+ * alive between requests, so `setInterval` can't survive; that's Render-only
+ * (src/asc/render-entry.ts) or would need a separate Cron Trigger, which
+ * isn't implemented.
  *
  * A new orchestrator instance is created per request, so `messageBus`
  * history does not persist across requests or survive multi-hop agent
@@ -16,6 +24,9 @@ export interface Env {
   BASE_RPC_URL: string;
   ORCHESTRATOR_PRIVATE_KEY: string;
   BOND_CONTRACT_ADDRESS: string;
+  // Optional — BYOK. Unset means deterministic (no real judgment) mode.
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
 }
 
 function isAgentMessageInput(value: unknown): value is AgentMessageInput {
@@ -55,7 +66,15 @@ export default {
       });
     }
 
-    const orchestrator = new SMLAgentSwarmOrchestrator(env.BASE_RPC_URL, env.ORCHESTRATOR_PRIVATE_KEY, env.BOND_CONTRACT_ADDRESS);
+    const llmClient = env.ANTHROPIC_API_KEY
+      ? new AnthropicAgentClient(env.ANTHROPIC_API_KEY, env.ANTHROPIC_MODEL)
+      : undefined;
+    const orchestrator = new SMLAgentSwarmOrchestrator(
+      env.BASE_RPC_URL,
+      env.ORCHESTRATOR_PRIVATE_KEY,
+      env.BOND_CONTRACT_ADDRESS,
+      llmClient
+    );
 
     try {
       await orchestrator.routeSecureMessage(body);

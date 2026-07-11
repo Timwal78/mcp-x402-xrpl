@@ -41,7 +41,7 @@ jobs:
           node-version: "22"
       - run: npm install
       - run: npx tsc --noEmit -p tsconfig.json
-      - run: npm test -- test/GhostBridge.test.ts
+      - run: npm test
 
   deploy:
     name: Deploy orchestrator to Cloudflare Workers

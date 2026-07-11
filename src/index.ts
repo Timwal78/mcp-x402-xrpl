@@ -80,5 +80,8 @@ export type { SwarmPersona, SwarmMemberResult, SwarmResult, SwarmOptions } from 
 export { SMLAgentSwarmOrchestrator } from "./asc/SMLAgentSwarmOrchestrator.js";
 export type { AgentMessage, AgentMessageInput, AgentRole, CodePatch } from "./asc/SMLAgentSwarmOrchestrator.js";
 
+export { AnthropicAgentClient } from "./asc/llm-agent.js";
+export type { AgentDecision, LlmAgentClient } from "./asc/llm-agent.js";
+
 export { SMLGhostLegacyBridge } from "./bridges/SMLGhostLegacyBridge.js";
 export type { LegacyAction, LegacyQueryRequest, LegacyQueryResponse } from "./bridges/SMLGhostLegacyBridge.js";

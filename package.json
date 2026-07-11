@@ -46,6 +46,7 @@
     "url": "https://github.com/Timwal78/mcp-x402-xrpl/issues"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.47.10",
     "@virtuals-protocol/acp-node-v2": "^0.1.6",

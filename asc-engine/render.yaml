@@ -1,0 +1,36 @@
+# Template Render Blueprint for deploying the ASC orchestrator on a
+# persistent host. Connect this repo (or your fork) to Render and fill in
+# the sync:false vars in the dashboard — never commit real secrets here.
+services:
+  - type: web
+    name: asc-orchestrator
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:server
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "3404"
+      # Set these three in the Render dashboard before this service does
+      # anything beyond answering /health — see README.md Quickstart.
+      - key: BASE_RPC_URL
+        sync: false
+      - key: ORCHESTRATOR_PRIVATE_KEY
+        sync: false
+      - key: BOND_CONTRACT_ADDRESS
+        sync: false
+      # Optional — BYOK real agent reasoning. Unset = deterministic mode.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false
+      # Leave unset/false until you've watched message-triggered mode
+      # behave correctly — this flag lets a real wallet act on an LLM's
+      # judgment with nobody approving each cycle.
+      - key: ASC_AUTONOMOUS
+        sync: false

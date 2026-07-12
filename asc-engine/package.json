@@ -1,0 +1,24 @@
+{
+  "name": "asc-engine",
+  "version": "1.0.0",
+  "description": "Deploy a self-funding, self-operating software business: a capped on-chain revenue bond plus an autonomous CEO/CFO/CTO/QA agent swarm that runs it.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "build": "tsc",
+    "start:server": "tsx src/server.ts",
+    "setup": "tsx scripts/setup-wizard.ts",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "ethers": "^6.13.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}

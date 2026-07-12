@@ -1,0 +1,65 @@
+name: Deploy contracts to Base Sepolia (testnet)
+
+on:
+  workflow_dispatch:
+    inputs:
+      payment_token_address:
+        description: "Test ERC-20 investors fund/get repaid in"
+        required: true
+      payment_token_decimals:
+        description: "Decimals for the payment token"
+        required: true
+        default: "6"
+      funding_target:
+        description: "Human-readable funding target, e.g. 250"
+        required: true
+        default: "250"
+      repayment_cap_multiplier_bps:
+        description: "Repayment cap in basis points, e.g. 12000 = 120%"
+        required: true
+        default: "12000"
+      repayment_split_basis_points:
+        description: "Basis points of each revenue payment routed to investors, e.g. 8000 = 80%"
+        required: true
+        default: "8000"
+
+jobs:
+  deploy-testnet:
+    name: Deploy SMLYieldBondFactory + first bond to Base Sepolia
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run compile
+
+      - name: Deploy SMLYieldBondFactory to Base Sepolia
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          PROTOCOL_TREASURY_ADDRESS: ${{ secrets.PROTOCOL_TREASURY_ADDRESS }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: npm run deploy:base-sepolia
+
+      - name: Deploy first SMLYieldBond
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          PAYMENT_TOKEN_ADDRESS: ${{ github.event.inputs.payment_token_address }}
+          PAYMENT_TOKEN_DECIMALS: ${{ github.event.inputs.payment_token_decimals }}
+          FUNDING_TARGET: ${{ github.event.inputs.funding_target }}
+          REPAYMENT_CAP_MULTIPLIER_BPS: ${{ github.event.inputs.repayment_cap_multiplier_bps }}
+          REPAYMENT_SPLIT_BASIS_POINTS: ${{ github.event.inputs.repayment_split_basis_points }}
+        run: npm run deploy-bond:base-sepolia
+
+      - name: Upload deployment records
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-sepolia-deployment
+          path: |
+            contracts/deployments/baseSepolia.json
+            contracts/deployments/baseSepolia-bond-1.json

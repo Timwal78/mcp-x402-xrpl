@@ -1,0 +1,70 @@
+name: Deploy contracts to Base Mainnet (REAL MONEY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "DEPLOY REAL MONEY" to confirm — this deploys SMLYieldBondFactory + a live bond to Base MAINNET using real funds from DEPLOYER_PRIVATE_KEY'
+        required: true
+      payment_token_address:
+        description: "ERC-20 investors fund/get repaid in (default: USDC on Base)"
+        required: true
+        default: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      payment_token_decimals:
+        description: "Decimals for the payment token (USDC = 6)"
+        required: true
+        default: "6"
+      funding_target:
+        description: "Human-readable funding target, e.g. 250 for 250 USDC"
+        required: true
+        default: "250"
+      repayment_cap_multiplier_bps:
+        description: "Repayment cap in basis points, e.g. 12000 = 120%"
+        required: true
+        default: "12000"
+      repayment_split_basis_points:
+        description: "Basis points of each revenue payment routed to investors until the cap is hit, e.g. 8000 = 80%"
+        required: true
+        default: "8000"
+
+jobs:
+  deploy-mainnet:
+    name: Deploy SMLYieldBondFactory + first bond to Base mainnet
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'DEPLOY REAL MONEY'
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run compile
+
+      - name: Deploy SMLYieldBondFactory to Base mainnet
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          PROTOCOL_TREASURY_ADDRESS: ${{ secrets.PROTOCOL_TREASURY_ADDRESS }}
+          BASE_MAINNET_RPC_URL: ${{ secrets.BASE_MAINNET_RPC_URL }}
+        run: npm run deploy:base
+
+      - name: Deploy first SMLYieldBond
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_MAINNET_RPC_URL: ${{ secrets.BASE_MAINNET_RPC_URL }}
+          PAYMENT_TOKEN_ADDRESS: ${{ github.event.inputs.payment_token_address }}
+          PAYMENT_TOKEN_DECIMALS: ${{ github.event.inputs.payment_token_decimals }}
+          FUNDING_TARGET: ${{ github.event.inputs.funding_target }}
+          REPAYMENT_CAP_MULTIPLIER_BPS: ${{ github.event.inputs.repayment_cap_multiplier_bps }}
+          REPAYMENT_SPLIT_BASIS_POINTS: ${{ github.event.inputs.repayment_split_basis_points }}
+        run: npm run deploy-bond:base
+
+      - name: Upload deployment records
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-mainnet-deployment
+          path: |
+            contracts/deployments/base.json
+            contracts/deployments/base-bond-1.json

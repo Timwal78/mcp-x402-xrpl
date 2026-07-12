@@ -1,0 +1,19 @@
+name = "asc-orchestrator"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets are set with `wrangler secret put <NAME>` — never written here:
+#   BASE_RPC_URL             — chain RPC endpoint
+#   ORCHESTRATOR_PRIVATE_KEY — wallet the CFO agent uses to call processRevenue()
+#   BOND_CONTRACT_ADDRESS    — your deployed SMLYieldBond address
+#   ANTHROPIC_API_KEY        — optional, BYOK
+#
+# NOTE: the autonomous "set and forget" CEO loop does not run on Workers
+# (no long-lived process). Use src/server.ts on a persistent host for that.

@@ -290,7 +290,15 @@ export function buildCanonicalX402Accepts(opts: {
     const usdcAtomicAmount = Math.round(parseFloat(opts.amount) * 1_000_000).toString();
     accepts.push({
       scheme: "exact",
-      network: "eip155:8453",
+      // Plain x402 network name, not CAIP-2 — the official x402-fetch client's
+      // bundled schema rejects "eip155:8453" outright (ZodError: invalid_enum_value,
+      // expected "base" | "base-sepolia" | ...) before it can even attempt payment.
+      // Confirmed against the same failure mode already fixed in the sibling
+      // mcp-x402 service (see server/index.ts there) — this accept is accepts[0],
+      // the entry most naive x402 clients read first, so the wrong value here
+      // silently blocks the entire standard (X-PAYMENT) rail on this router's
+      // paid routes (/vend/dynamic, /ghost-layer/notarize, /marketplace/list).
+      network: "base",
       amount: usdcAtomicAmount,
       payTo: opts.baseDestination,
       maxTimeoutSeconds: 60,

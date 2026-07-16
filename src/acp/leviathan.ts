@@ -2,6 +2,17 @@
  * LEVIATHAN — Virtuals Protocol ACP Seller Agent
  * ScriptMasterLabs | @scriptmasterlabs/mcp-x402
  *
+ * STALE / NOT DEPLOYED — this repo's Render service (`scriptmaster-vending-router`,
+ * see render.yaml) runs `start:vending-router` → src/vending-router-server.ts,
+ * which never imports this file. The only wiring for this file is
+ * src/squeezeos-server.ts (`npm start`), which is not what Render actually runs.
+ * The live LEVIATHAN agent is SML_Portfolio/mcp-x402/src/server/acp/leviathan.ts
+ * (Render service `mcp-x402`, wallet 0x0f035c36c4ce65a6f1bf4370f779bac722d59004,
+ * 54 offerings, Title-Case job names) — see SqueezeOS/CLAUDE.md,
+ * "LEVIATHAN / Virtuals ACP Marketplace" section, for the full investigation.
+ * Do not treat the wallet default, offering count, or snake_case job names
+ * below as current.
+ *
  * 23 institutional-grade offerings on the Virtuals ACP marketplace.
  * Buyers pay USDC on Base chain via Virtuals Protocol ACP v2.
  * LEVIATHAN fetches live data from the SqueezeOS + federal data backends,

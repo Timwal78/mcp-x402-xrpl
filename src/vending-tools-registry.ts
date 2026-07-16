@@ -149,6 +149,29 @@ export const VENDING_TOOLS: VendingToolSpec[] = [
     tags: ["marketplace", "listing", "paid", "agent-economy", "third-party"],
   },
   {
+    id: "settlement_router_status",
+    name: "x402 Settlement Router — Task Status",
+    description:
+      "Read-only status for a multi-agent payment-netting task deployed via the x402 Settlement Router " +
+      "(non-custodial Base smart contracts — see asc-contracts/contracts/settlement-router/). Returns the " +
+      "task's escrow address, funded budget, total posted bonds, and settle/cancel state. Task creation and " +
+      "settlement are orchestrator-only (secret-gated, not x402-metered — the real revenue event is the 0.5% " +
+      "protocol fee FeeRegistry deducts automatically on-chain during settlement, so this discovery read stays " +
+      "free like ghost_layer_status). Not deployed to any network yet — see asc-contracts/README.md.",
+    endpoint: "/settlement-router/tasks/:taskId",
+    method: "GET",
+    recommended: false,
+    free: true,
+    inputSchema: {
+      type: "object",
+      required: ["taskId"],
+      properties: {
+        taskId: { type: "string", description: "bytes32 task identifier returned by task creation." },
+      },
+    },
+    tags: ["settlement-router", "agent-economy", "netting", "base", "free", "discovery"],
+  },
+  {
     id: "exchange_browse",
     name: "Ghost Exchange — Compute & Intelligence Listings",
     description:

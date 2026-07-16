@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>x402 Settlement Router — Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131722;
+    --border: #232838;
+    --text: #e6e9f0;
+    --muted: #8b93a7;
+    --accent: #ff6600;
+    --accent-dim: #7a3300;
+    --ok: #35c26a;
+    --err: #ff5c5c;
+    --mono: "SF Mono", "Fira Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .banner {
+    background: #201408;
+    border: 1px solid var(--accent-dim);
+    color: #ffb37a;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    padding: 8px 16px;
+    border-radius: 8px 8px 0 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .tab.active { color: var(--text); background: #171c29; border-color: var(--accent-dim); }
+  .panel {
+    background: #171c29;
+    border: 1px solid var(--border);
+    border-radius: 0 8px 8px 8px;
+    padding: 20px;
+    max-width: 720px;
+  }
+  .hidden { display: none; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  input, textarea {
+    width: 100%;
+    background: #0e1119;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  button {
+    margin-top: 16px;
+    background: var(--accent);
+    color: #14100a;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); margin-left: 8px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre {
+    background: #0e1119;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .status { font-size: 12px; margin-top: 10px; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .field-row { display: flex; gap: 8px; align-items: flex-end; }
+  .field-row > div { flex: 1; }
+  .task-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .task-row input { flex: 1; }
+  .small { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>x402 Settlement Router</h1>
+  <div class="subtitle">Non-custodial multi-agent payment netting on Base — orchestrator + agent control panel</div>
+
+  <div class="banner">
+    <strong>Status:</strong> not deployed to any network yet. This page talks to the mcp-x402-xrpl vending-router
+    HTTP API (<code>/settlement-router/*</code>) and, for agent actions, directly to the on-chain
+    <code>TaskEscrow</code> contract via a browser wallet. See <code>asc-contracts/README.md</code> for deploy
+    status. This is an operator/agent tool, not a public marketing page — nothing here is billed via x402.
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="orchestrator">Orchestrator</div>
+    <div class="tab" data-tab="agent">Agent</div>
+    <div class="tab" data-tab="config">Config</div>
+  </div>
+
+  <!-- ── Orchestrator panel ─────────────────────────────────────────── -->
+  <div class="panel" id="panel-orchestrator">
+    <h3 style="margin-top:0">Create task</h3>
+    <label>Agent addresses (0x…, one per line)</label>
+    <textarea id="agents" rows="3" placeholder="0xAgentA...&#10;0xAgentB...&#10;0xAgentC..."></textarea>
+    <label>Expected payouts (token base units, same order as agents, one per line)</label>
+    <textarea id="payouts" rows="3" placeholder="30000000&#10;10000000&#10;10000000"></textarea>
+    <label>Deadline (hours from now)</label>
+    <input id="deadlineHours" type="number" value="24" />
+    <label>X-Orchestrator-Secret</label>
+    <input id="orchestratorSecret" type="password" placeholder="matches SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET" />
+    <button id="btnCreateTask">Create task</button>
+    <div id="createStatus" class="status"></div>
+
+    <h3>Payment graph edges → settle</h3>
+    <div class="small">Add every completed sub-task payment (from → to → amount). Settling nets the whole graph into one on-chain transaction.</div>
+    <div id="edgeRows"></div>
+    <button class="secondary" id="btnAddEdgeRow" type="button">+ add edge</button>
+    <label>Task ID (from create response, or paste an existing one)</label>
+    <input id="settleTaskId" placeholder="uuid returned by create task, or on-chain bytes32 taskId" />
+    <button id="btnSettle">Net + settle on-chain</button>
+    <div id="settleStatus" class="status"></div>
+
+    <h3>Browse tasks</h3>
+    <button id="btnRefreshTasks" type="button">Refresh</button>
+    <pre id="taskList">—</pre>
+  </div>
+
+  <!-- ── Agent panel ────────────────────────────────────────────────── -->
+  <div class="panel hidden" id="panel-agent">
+    <h3 style="margin-top:0">Connect wallet</h3>
+    <button id="btnConnect">Connect wallet</button>
+    <div id="walletStatus" class="status small">Not connected</div>
+
+    <h3>Task escrow</h3>
+    <label>On-chain task ID (bytes32)</label>
+    <input id="agentTaskId" placeholder="0x..." />
+    <button id="btnLoadEscrow" type="button">Load bond requirement</button>
+    <pre id="escrowInfo">—</pre>
+
+    <h3>Deposit bond</h3>
+    <label>Amount (token base units — defaults to your required bond above)</label>
+    <input id="bondAmount" placeholder="e.g. 5000000" />
+    <button id="btnDepositBond">Approve + deposit bond</button>
+    <div id="bondStatus" class="status"></div>
+    <div class="small">Uses a standard approve() + depositBond() two-step. depositBondWithPermit() (gasless
+      approval) is supported on-chain but needs an EIP-2612 signature flow this minimal page doesn't implement yet —
+      see <code>src/settlement-router/client.ts</code>'s test suite for a worked example if you're wiring a fuller UI.</div>
+  </div>
+
+  <!-- ── Config panel ───────────────────────────────────────────────── -->
+  <div class="panel hidden" id="panel-config">
+    <label>API base URL (mcp-x402-xrpl vending-router)</label>
+    <input id="apiBase" placeholder="https://scriptmaster-vending-router.onrender.com" />
+    <label>Base RPC URL (agent tab — reads escrow state directly)</label>
+    <input id="rpcUrl" placeholder="https://mainnet.base.org" />
+    <label>Settlement token address (ERC-20, e.g. USDC on Base)</label>
+    <input id="tokenAddress" placeholder="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" />
+    <button id="btnSaveConfig" type="button">Save (stored in this browser only)</button>
+    <div class="small" style="margin-top:12px">Nothing on this page is sent anywhere except the API base URL above
+      and, for agent actions, your connected wallet's own RPC calls. The orchestrator secret you type in the
+      Orchestrator tab is sent only to the API base URL you configure here — treat this page like any other admin
+      console and only point it at an API base you control.</div>
+  </div>
+
+<script type="module">
+import { ethers } from "https://esm.sh/ethers@6.13.4";
+
+const TASK_ESCROW_ABI = [
+  "function taskBudget() external view returns (uint256)",
+  "function totalBonded() external view returns (uint256)",
+  "function isSettled() external view returns (bool)",
+  "function isCancelled() external view returns (bool)",
+  "function bondRequired(address agent) external view returns (uint256)",
+  "function bondDeposited(address agent) external view returns (uint256)",
+  "function depositBond(address agent, uint256 amount) external",
+];
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function allowance(address owner, address spender) external view returns (uint256)",
+];
+
+const cfg = {
+  apiBase: localStorage.getItem("sr_apiBase") || "",
+  rpcUrl: localStorage.getItem("sr_rpcUrl") || "https://mainnet.base.org",
+  tokenAddress: localStorage.getItem("sr_tokenAddress") || "",
+};
+document.getElementById("apiBase").value = cfg.apiBase;
+document.getElementById("rpcUrl").value = cfg.rpcUrl;
+document.getElementById("tokenAddress").value = cfg.tokenAddress;
+
+document.getElementById("btnSaveConfig").onclick = () => {
+  cfg.apiBase = document.getElementById("apiBase").value.trim().replace(/\/$/, "");
+  cfg.rpcUrl = document.getElementById("rpcUrl").value.trim();
+  cfg.tokenAddress = document.getElementById("tokenAddress").value.trim();
+  localStorage.setItem("sr_apiBase", cfg.apiBase);
+  localStorage.setItem("sr_rpcUrl", cfg.rpcUrl);
+  localStorage.setItem("sr_tokenAddress", cfg.tokenAddress);
+  alert("Saved.");
+};
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+for (const tab of document.querySelectorAll(".tab")) {
+  tab.onclick = () => {
+    for (const t of document.querySelectorAll(".tab")) t.classList.remove("active");
+    for (const p of document.querySelectorAll(".panel")) p.classList.add("hidden");
+    tab.classList.add("active");
+    document.getElementById("panel-" + tab.dataset.tab).classList.remove("hidden");
+  };
+}
+
+function setStatus(el, msg, ok) {
+  el.textContent = msg;
+  el.className = "status " + (ok ? "ok" : "err");
+}
+
+async function api(path, options = {}) {
+  if (!cfg.apiBase) throw new Error("Set API base URL in the Config tab first.");
+  const res = await fetch(cfg.apiBase + path, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ? `${body.error}: ${body.message || JSON.stringify(body)}` : `HTTP ${res.status}`);
+  return body;
+}
+
+// ── Orchestrator: create task ────────────────────────────────────────────
+document.getElementById("btnCreateTask").onclick = async () => {
+  const statusEl = document.getElementById("createStatus");
+  try {
+    const agents = document.getElementById("agents").value.split("\n").map((s) => s.trim()).filter(Boolean);
+    const expected_payouts = document.getElementById("payouts").value.split("\n").map((s) => s.trim()).filter(Boolean);
+    const deadline_hours = Number(document.getElementById("deadlineHours").value || 24);
+    const secret = document.getElementById("orchestratorSecret").value;
+    if (agents.length === 0 || agents.length !== expected_payouts.length) {
+      throw new Error("agents and expected_payouts must be the same non-zero length");
+    }
+    const result = await api("/settlement-router/tasks", {
+      method: "POST",
+      headers: { "X-Orchestrator-Secret": secret },
+      body: JSON.stringify({ agents, expected_payouts, deadline_hours }),
+    });
+    document.getElementById("settleTaskId").value = result.task_id;
+    setStatus(statusEl, `Created — task_id=${result.task_id} escrow=${result.escrow_address}`, true);
+    refreshTasks();
+  } catch (err) {
+    setStatus(statusEl, String(err.message || err), false);
+  }
+};
+
+// ── Orchestrator: edges + settle ─────────────────────────────────────────
+function addEdgeRow() {
+  const row = document.createElement("div");
+  row.className = "task-row";
+  row.innerHTML = `
+    <input placeholder="from 0x..." class="edge-from" />
+    <input placeholder="to 0x..." class="edge-to" />
+    <input placeholder="amount (base units)" class="edge-amount" />
+  `;
+  document.getElementById("edgeRows").appendChild(row);
+}
+document.getElementById("btnAddEdgeRow").onclick = addEdgeRow;
+addEdgeRow();
+addEdgeRow();
+
+document.getElementById("btnSettle").onclick = async () => {
+  const statusEl = document.getElementById("settleStatus");
+  try {
+    const taskId = document.getElementById("settleTaskId").value.trim();
+    const secret = document.getElementById("orchestratorSecret").value;
+    if (!taskId) throw new Error("Task ID required");
+
+    const rows = document.querySelectorAll("#edgeRows .task-row");
+    for (const row of rows) {
+      const from = row.querySelector(".edge-from").value.trim();
+      const to = row.querySelector(".edge-to").value.trim();
+      const amount = row.querySelector(".edge-amount").value.trim();
+      if (!from || !to || !amount) continue;
+      await api(`/settlement-router/tasks/${taskId}/edges`, {
+        method: "POST",
+        headers: { "X-Orchestrator-Secret": secret },
+        body: JSON.stringify({ from, to, amount }),
+      });
+    }
+
+    const result = await api(`/settlement-router/tasks/${taskId}/settle`, {
+      method: "POST",
+      headers: { "X-Orchestrator-Secret": secret },
+    });
+    setStatus(statusEl, `Settled — ${JSON.stringify(result.result || result)}`, true);
+    refreshTasks();
+  } catch (err) {
+    setStatus(statusEl, String(err.message || err), false);
+  }
+};
+
+async function refreshTasks() {
+  try {
+    const result = await api("/settlement-router/tasks");
+    document.getElementById("taskList").textContent = JSON.stringify(result, null, 2);
+  } catch (err) {
+    document.getElementById("taskList").textContent = String(err.message || err);
+  }
+}
+document.getElementById("btnRefreshTasks").onclick = refreshTasks;
+
+// ── Agent: wallet + bond deposit ─────────────────────────────────────────
+let signer = null;
+
+document.getElementById("btnConnect").onclick = async () => {
+  const statusEl = document.getElementById("walletStatus");
+  if (!window.ethereum) {
+    setStatus(statusEl, "No injected wallet found (e.g. MetaMask) — install one to deposit bonds from this page.", false);
+    return;
+  }
+  try {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    signer = await provider.getSigner();
+    setStatus(statusEl, `Connected: ${await signer.getAddress()}`, true);
+  } catch (err) {
+    setStatus(statusEl, String(err.message || err), false);
+  }
+};
+
+let currentEscrow = null;
+
+document.getElementById("btnLoadEscrow").onclick = async () => {
+  const el = document.getElementById("escrowInfo");
+  try {
+    const taskId = document.getElementById("agentTaskId").value.trim();
+    const result = await api(`/settlement-router/tasks/${taskId}`);
+    const provider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+    const escrow = new ethers.Contract(result.escrowAddress || result.escrow_address, TASK_ESCROW_ABI, provider);
+    currentEscrow = escrow;
+    const address = signer ? await signer.getAddress() : ethers.ZeroAddress;
+    const [required, deposited] = await Promise.all([
+      escrow.bondRequired(address),
+      escrow.bondDeposited(address),
+    ]);
+    el.textContent = JSON.stringify(
+      { escrowAddress: await escrow.getAddress(), yourAddress: address, bondRequired: required.toString(), bondDeposited: deposited.toString() },
+      null,
+      2
+    );
+    document.getElementById("bondAmount").value = required.toString();
+  } catch (err) {
+    el.textContent = String(err.message || err);
+  }
+};
+
+document.getElementById("btnDepositBond").onclick = async () => {
+  const statusEl = document.getElementById("bondStatus");
+  try {
+    if (!signer) throw new Error("Connect a wallet first");
+    if (!currentEscrow) throw new Error("Load an escrow first");
+    if (!cfg.tokenAddress) throw new Error("Set the settlement token address in Config first");
+
+    const amount = BigInt(document.getElementById("bondAmount").value);
+    const escrowAddress = await currentEscrow.getAddress();
+    const token = new ethers.Contract(cfg.tokenAddress, ERC20_ABI, signer);
+    const approveTx = await token.approve(escrowAddress, amount);
+    await approveTx.wait();
+
+    const escrowWithSigner = currentEscrow.connect(signer);
+    const address = await signer.getAddress();
+    const depositTx = await escrowWithSigner.depositBond(address, amount);
+    const receipt = await depositTx.wait();
+    setStatus(statusEl, `Bond deposited — tx ${receipt.hash}`, true);
+  } catch (err) {
+    setStatus(statusEl, String(err.message || err), false);
+  }
+};
+</script>
+</body>
+</html>

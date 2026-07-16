@@ -16,6 +16,13 @@ const config: HardhatUserConfig = {
     version: "0.8.24",
     settings: {
       optimizer: { enabled: true, runs: 200 },
+      // viaIR: settlement-router/TaskEscrow.sol hits "stack too deep" without
+      // it (many calldata params + loops). evmVersion: "cancun" because
+      // OpenZeppelin's Bytes.sol (pulled in via SafeERC20) uses MCOPY, which
+      // only exists from Cancun onward — Base has been on Cancun since
+      // March 2024, so this is safe for the real deploy targets too.
+      viaIR: true,
+      evmVersion: "cancun",
     },
   },
   networks: {

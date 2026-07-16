@@ -1,0 +1,79 @@
+name: x402 Settlement Router — Manual Base Mainnet Deploy (REAL MONEY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "DEPLOY REAL MONEY" to confirm — this deploys SettlementRouterFactory + a router to Base MAINNET using real funds from DEPLOYER_PRIVATE_KEY'
+        required: true
+      orchestrator_address:
+        description: "Address SettlementRouter.onlyOrchestrator will trust — the public address of the wallet behind SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY on the vending-router Render service (paste the address, never the key, here)"
+        required: true
+      reputation_updater_address:
+        description: "Address authorized to push ARGUS/402Proof scores into ReputationOracle (public address, not a key)"
+        required: true
+      protocol_fee_bps:
+        description: "Initial protocol fee, basis points (50 = 0.5%). Hard-capped at 500 on-chain — no governance path can exceed this."
+        required: true
+        default: "50"
+
+jobs:
+  deploy-mainnet:
+    name: Deploy SettlementRouterFactory + one router to Base mainnet
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'DEPLOY REAL MONEY'
+    defaults:
+      run:
+        working-directory: asc-contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run compile
+      - run: npm test
+
+      - name: Refuse to deploy unless the treasury is a real contract (Safe), not an EOA
+        env:
+          PROTOCOL_TREASURY_ADDRESS: ${{ secrets.PROTOCOL_TREASURY_ADDRESS }}
+          BASE_MAINNET_RPC_URL: ${{ secrets.BASE_MAINNET_RPC_URL }}
+        run: |
+          if [ -z "$PROTOCOL_TREASURY_ADDRESS" ]; then
+            echo "::error::PROTOCOL_TREASURY_ADDRESS secret is not set. Set it to a Gnosis Safe multisig address (app.safe.global) before running this — see FeeRegistry.sol's NatSpec and the PRD non-negotiable on treasury custody."
+            exit 1
+          fi
+          RPC_URL="${BASE_MAINNET_RPC_URL:-https://mainnet.base.org}"
+          CODE=$(curl -sS -X POST "$RPC_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getCode\",\"params\":[\"$PROTOCOL_TREASURY_ADDRESS\",\"latest\"]}" \
+            | grep -o '"result":"[^"]*"' | cut -d'"' -f4)
+          if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
+            echo "::error::PROTOCOL_TREASURY_ADDRESS ($PROTOCOL_TREASURY_ADDRESS) has no contract code on Base mainnet — it's an EOA (or eth_getCode failed), not a Safe. The PRD requires this to be a Gnosis Safe multisig, not a single wallet. Deploy a Safe at app.safe.global first."
+            exit 1
+          fi
+          echo "Treasury $PROTOCOL_TREASURY_ADDRESS confirmed as a contract (has bytecode) on Base mainnet."
+
+      - name: Deploy SettlementRouterFactory to Base mainnet
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          PROTOCOL_TREASURY_ADDRESS: ${{ secrets.PROTOCOL_TREASURY_ADDRESS }}
+          BASE_MAINNET_RPC_URL: ${{ secrets.BASE_MAINNET_RPC_URL }}
+          PROTOCOL_FEE_BPS: ${{ github.event.inputs.protocol_fee_bps }}
+          REPUTATION_UPDATER_ADDRESS: ${{ github.event.inputs.reputation_updater_address }}
+        run: npm run deploy-settlement-router:base
+
+      - name: Create router for the orchestrator
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_MAINNET_RPC_URL: ${{ secrets.BASE_MAINNET_RPC_URL }}
+          ORCHESTRATOR_ADDRESS: ${{ github.event.inputs.orchestrator_address }}
+        run: npm run create-router:base
+
+      - name: Upload deployment records
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-mainnet-settlement-router-deployment
+          path: |
+            asc-contracts/deployments/base-settlement-router.json
+            asc-contracts/deployments/base-router-*.json

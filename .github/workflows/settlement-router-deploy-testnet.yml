@@ -1,0 +1,59 @@
+name: x402 Settlement Router — Manual Base Sepolia Deploy (testnet only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm deploying SettlementRouterFactory to Base Sepolia (testnet only — no real funds)'
+        required: true
+      orchestrator_address:
+        description: "Address SettlementRouter.onlyOrchestrator will trust — the public address of the wallet behind SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY on the vending-router Render service (paste the address, never the key, here)"
+        required: true
+      reputation_updater_address:
+        description: "Address authorized to push ARGUS/402Proof scores into ReputationOracle (public address, not a key)"
+        required: true
+      protocol_fee_bps:
+        description: "Initial protocol fee, basis points (50 = 0.5%). Hard-capped at 500 on-chain."
+        required: true
+        default: "50"
+
+jobs:
+  deploy-testnet:
+    name: Deploy SettlementRouterFactory + one router to Base Sepolia
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'deploy'
+    defaults:
+      run:
+        working-directory: asc-contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run compile
+      - run: npm test
+
+      - name: Deploy SettlementRouterFactory to Base Sepolia
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          PROTOCOL_TREASURY_ADDRESS: ${{ secrets.PROTOCOL_TREASURY_ADDRESS }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          PROTOCOL_FEE_BPS: ${{ github.event.inputs.protocol_fee_bps }}
+          REPUTATION_UPDATER_ADDRESS: ${{ github.event.inputs.reputation_updater_address }}
+        run: npm run deploy-settlement-router:base-sepolia
+
+      - name: Create router for the orchestrator
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          ORCHESTRATOR_ADDRESS: ${{ github.event.inputs.orchestrator_address }}
+        run: npm run create-router:base-sepolia
+
+      - name: Upload deployment records
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-sepolia-settlement-router-deployment
+          path: |
+            asc-contracts/deployments/baseSepolia-settlement-router.json
+            asc-contracts/deployments/baseSepolia-router-*.json

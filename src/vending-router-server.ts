@@ -40,6 +40,8 @@ import { verifyPayment, type VerificationResult } from "./payment-verifier.js";
 import { GhostLayerClient, type GhostLayerNotarizeReceipt } from "./ghost-layer-client.js";
 import { generateManifest, generateOpenApiSpec } from "./manifest-generator.js";
 import { MarketplaceClient } from "./marketplace-client.js";
+import { SettlementRouterClient } from "./settlement-router/client.js";
+import type { PaymentEdge } from "./settlement-router/netting.js";
 import {
   VENDING_TOOLS,
   NOTARIZE_PRICE,
@@ -87,6 +89,47 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const marketplace =
   SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? new MarketplaceClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
 
+// x402 Settlement Router — non-custodial multi-agent payment netting
+// (asc-contracts/contracts/settlement-router/). Nullable, same pattern as
+// `marketplace` above: routes return a clear settlement_router_not_configured
+// error instead of faking a task until real deploy values are set. As of
+// this writing SettlementRouterFactory has not been deployed to any network
+// (see asc-contracts/README.md) — every var below is unset by default.
+const SETTLEMENT_ROUTER_RPC_URL = process.env.SETTLEMENT_ROUTER_RPC_URL || "https://mainnet.base.org";
+const SETTLEMENT_ROUTER_ADDRESS = process.env.SETTLEMENT_ROUTER_ADDRESS;
+const SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY = process.env.SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY;
+// Static shared secret gating the orchestrator-only routes below (create
+// task / settle / slash) — same pattern as SqueezeOS's X-Grants-Secret /
+// X-Marketing-Secret. This is NOT an x402 payment gate: these are
+// orchestrator control-plane calls (only the address SettlementRouterFactory
+// bound as `orchestrator` can ever sign the resulting on-chain tx anyway),
+// not a per-agent paid product — the real revenue event is the 0.5%
+// protocol fee FeeRegistry deducts automatically inside settleTask() on
+// Base, so x402-metering the HTTP trigger too would double-charge for the
+// same settlement. GET /settlement-router/tasks/:taskId (read-only status)
+// has no secret requirement, same as GET /marketplace/listings.
+const SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET = process.env.SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET;
+const settlementRouter =
+  SETTLEMENT_ROUTER_ADDRESS && SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY
+    ? new SettlementRouterClient(
+        SETTLEMENT_ROUTER_RPC_URL,
+        SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY,
+        SETTLEMENT_ROUTER_ADDRESS
+      )
+    : null;
+
+function requireOrchestratorSecret(req: Request, res: Response): boolean {
+  if (!SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET) {
+    res.status(503).json({ error: "settlement_router_secret_not_configured" });
+    return false;
+  }
+  if (req.headers["x-orchestrator-secret"] !== SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET) {
+    res.status(401).json({ error: "invalid_orchestrator_secret" });
+    return false;
+  }
+  return true;
+}
+
 // ─── Payment verification helper (real on-chain check, not presence-only) ─────
 
 interface PaymentCheckOptions {
@@ -114,6 +157,10 @@ app.set("trust proxy", 1);
 // or third-party integration — there's no session/cookie state to protect.
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+// Serves public/settlement-router-dashboard.html (and any other static
+// asset dropped in public/, e.g. sitemap.xml) — falls through to the routes
+// below for any path that isn't an actual file, so it can't shadow them.
+app.use(express.static(path.join(process.cwd(), "public")));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", server: "scriptmaster-agentic-vending-router", uptimeSeconds: process.uptime() });
@@ -708,6 +755,139 @@ function buildMcpServer(): McpServer {
 
   return server;
 }
+
+// ── x402 Settlement Router — task lifecycle over HTTP ──────────────────────
+// Thin HTTP surface over SettlementRouterClient (settlement-router/client.ts),
+// itself a thin ethers wrapper around the on-chain SettlementRouter contract.
+// See the settlementRouter / requireOrchestratorSecret setup above for why
+// these are secret-gated rather than x402-metered.
+
+app.post("/settlement-router/tasks", async (req: Request, res: Response) => {
+  if (!settlementRouter) {
+    res.status(503).json({ error: "settlement_router_not_configured" });
+    return;
+  }
+  if (!requireOrchestratorSecret(req, res)) return;
+
+  const body = req.body ?? {};
+  const { agents, expectedPayouts, bondOverridesBps, deadline } = body;
+  if (!Array.isArray(agents) || agents.length === 0 || !Array.isArray(expectedPayouts)) {
+    res.status(400).json({ error: "missing_required_field", required: ["agents", "expectedPayouts", "deadline"] });
+    return;
+  }
+  if (!deadline || typeof deadline !== "number") {
+    res.status(400).json({ error: "invalid_deadline", detail: "deadline must be a unix-seconds number" });
+    return;
+  }
+
+  const taskId: string = typeof body.taskId === "string" ? body.taskId : crypto.randomBytes(32).toString("hex");
+  const taskIdHex = taskId.startsWith("0x") ? taskId : `0x${taskId}`;
+
+  try {
+    const result = await settlementRouter.createTask({
+      taskId: taskIdHex,
+      agents,
+      expectedPayouts: expectedPayouts.map((p: string | number) => BigInt(p)),
+      bondOverridesBps: Array.isArray(bondOverridesBps) ? bondOverridesBps.map((b: string | number) => BigInt(b)) : undefined,
+      deadline,
+    });
+    res.json({ taskId: taskIdHex, ...result });
+  } catch (err) {
+    res.status(502).json({ error: "create_task_failed", details: String(err) });
+  }
+});
+
+app.get("/settlement-router/tasks/:taskId", async (req: Request, res: Response) => {
+  if (!settlementRouter) {
+    res.status(503).json({ error: "settlement_router_not_configured" });
+    return;
+  }
+  try {
+    const status = await settlementRouter.getTaskStatus(req.params.taskId);
+    if (!status) {
+      res.status(404).json({ error: "unknown_task" });
+      return;
+    }
+    res.json({
+      taskId: req.params.taskId,
+      escrowAddress: status.escrowAddress,
+      taskBudget: status.taskBudget.toString(),
+      totalBonded: status.totalBonded.toString(),
+      isSettled: status.isSettled,
+      isCancelled: status.isCancelled,
+      agents: status.agents,
+    });
+  } catch (err) {
+    res.status(502).json({ error: "task_status_failed", details: String(err) });
+  }
+});
+
+// Body: { edges: [{ from, to, amount }] } — amount is a decimal string in
+// the token's smallest unit (USDC = 6 decimals). Nets `edges` off-chain
+// (netting.ts), validates against the task's real on-chain budget and
+// current protocol fee, then submits exactly one settleTask() transaction.
+app.post("/settlement-router/tasks/:taskId/settle", async (req: Request, res: Response) => {
+  if (!settlementRouter) {
+    res.status(503).json({ error: "settlement_router_not_configured" });
+    return;
+  }
+  if (!requireOrchestratorSecret(req, res)) return;
+
+  const edgesInput = req.body?.edges;
+  if (!Array.isArray(edgesInput) || edgesInput.length === 0) {
+    res.status(400).json({ error: "missing_required_field", required: ["edges"] });
+    return;
+  }
+
+  let edges: PaymentEdge[];
+  try {
+    edges = edgesInput.map((e: { from: string; to: string; amount: string | number }) => ({
+      from: e.from,
+      to: e.to,
+      amount: BigInt(e.amount),
+    }));
+  } catch (err) {
+    res.status(400).json({ error: "invalid_edges", details: String(err) });
+    return;
+  }
+
+  const taskId = req.params.taskId.startsWith("0x") ? req.params.taskId : `0x${req.params.taskId}`;
+
+  try {
+    const result = await settlementRouter.settleTaskFromGraph(taskId, edges);
+    res.json({
+      ...result,
+      netPayouts: result.netPayouts.map(String),
+      totalFlow: result.totalFlow.toString(),
+      protocolFee: result.protocolFee.toString(),
+    });
+  } catch (err) {
+    res.status(502).json({ error: "settle_task_failed", details: String(err) });
+  }
+});
+
+app.post("/settlement-router/tasks/:taskId/slash", async (req: Request, res: Response) => {
+  if (!settlementRouter) {
+    res.status(503).json({ error: "settlement_router_not_configured" });
+    return;
+  }
+  if (!requireOrchestratorSecret(req, res)) return;
+
+  const { agent, amount, recipient } = req.body ?? {};
+  if (!agent || !amount || !recipient) {
+    res.status(400).json({ error: "missing_required_field", required: ["agent", "amount", "recipient"] });
+    return;
+  }
+
+  const taskId = req.params.taskId.startsWith("0x") ? req.params.taskId : `0x${req.params.taskId}`;
+
+  try {
+    const txHash = await settlementRouter.slashAgent(taskId, agent, BigInt(amount), recipient);
+    res.json({ taskId, agent, amount: String(amount), recipient, txHash });
+  } catch (err) {
+    res.status(502).json({ error: "slash_agent_failed", details: String(err) });
+  }
+});
 
 // GET /mcp — friendly info summary for a human browser hitting this URL
 // directly (e.g. clicking a "Connect Agent" link). The real protocol only

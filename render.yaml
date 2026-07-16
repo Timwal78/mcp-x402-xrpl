@@ -49,6 +49,31 @@ services:
         value: "https://mkftltqjxeqejztzomzf.supabase.co"
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      # x402 Settlement Router — see src/settlement-router/ and
+      # asc-contracts/contracts/settlement-router/. All four unset by
+      # default: SettlementRouterFactory has not been deployed to any
+      # network yet (see asc-contracts/README.md), so
+      # /settlement-router/* routes return settlement_router_not_configured
+      # until these are filled in after a real deploy.
+      # SETTLEMENT_ROUTER_RPC_URL: optional, defaults to https://mainnet.base.org.
+      - key: SETTLEMENT_ROUTER_RPC_URL
+        sync: false
+      # SETTLEMENT_ROUTER_ADDRESS: the per-orchestrator SettlementRouter
+      # address from `npm run create-router:base` (asc-contracts/), not the
+      # factory address.
+      - key: SETTLEMENT_ROUTER_ADDRESS
+        sync: false
+      # SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY: real funds key — the
+      # same address SettlementRouterFactory.createRouter() bound as this
+      # router's orchestrator. Set only in the Render dashboard.
+      - key: SETTLEMENT_ROUTER_ORCHESTRATOR_PRIVATE_KEY
+        sync: false
+      # SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET: static shared secret gating
+      # POST /settlement-router/tasks* (create/settle/slash) via the
+      # X-Orchestrator-Secret header — not an x402 payment gate, see the
+      # comment above requireOrchestratorSecret() in vending-router-server.ts.
+      - key: SETTLEMENT_ROUTER_ORCHESTRATOR_SECRET
+        sync: false
 
   # SML ASC orchestrator — CEO/CFO/CTO/QA swarm for the deployed SMLYieldBond
   # (0xFc04ee4c26fDB51CCe9A1A8266217d39DE872f08 on Base mainnet). This

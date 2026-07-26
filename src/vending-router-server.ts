@@ -36,7 +36,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import { sendPaymentRequired, computeDynamicAmount } from "./x402-middleware.js";
-import { verifyPayment, type VerificationResult } from "./payment-verifier.js";
+import { verifyPayment, verifyBaseUsdcPayment, USDC_BASE_CONTRACT, type VerificationResult } from "./payment-verifier.js";
 import { GhostLayerClient, type GhostLayerNotarizeReceipt } from "./ghost-layer-client.js";
 import { generateManifest, generateOpenApiSpec } from "./manifest-generator.js";
 import { MarketplaceClient } from "./marketplace-client.js";
@@ -887,6 +887,157 @@ app.post("/settlement-router/tasks/:taskId/slash", async (req: Request, res: Res
   } catch (err) {
     res.status(502).json({ error: "slash_agent_failed", details: String(err) });
   }
+});
+
+// ─── x402 Launchpad ───────────────────────────────────────────────────────────
+//
+// "Deploy an API, have agents pay you" in under 60 seconds. Deliberately NOT
+// implemented as "generate code and push it to Cloudflare Workers/Vercel" —
+// that needs a new set of cloud API credentials this operator hasn't set up
+// yet (see .env.example if that ever changes). Instead, a "deployed" Launchpad
+// API is a dynamic route on THIS already-live, already-audited server: same
+// real on-chain USDC verification as /vend/dynamic above (verifyBaseUsdcPayment,
+// payment-verifier.ts), same replay protection, zero new infra, and — the part
+// that matters most — payment settles directly to the developer's OWN wallet
+// address, never to this server's own receiving address. This server verifies
+// and serves data; it never custodies a cent of the payment.
+//
+// In-memory registry (_launchpad), resets on restart — same disclosed MVP
+// pattern as _futures/_contracts/_listings/_jobs elsewhere in this ecosystem.
+// No "test with agent" bounty wallet exists here — that would mean an
+// SML-controlled wallet autonomously paying arbitrary, unreviewed developer
+// endpoints, which is a real custody decision nobody has made yet. Instead,
+// GET /launchpad/api/:id with no payment header returns the real, live 402
+// challenge (real payTo, real amount) — a browser or agent can see and even
+// pay it, but nothing here spends money on a developer's behalf.
+
+interface LaunchpadEntry {
+  id: string;
+  template: "hello-world" | "btc-price";
+  priceUsd: number;
+  walletAddress: string;
+  createdAt: string;
+  callCount: number;
+  lastCallAt?: string;
+}
+
+const LAUNCHPAD_TEMPLATES = new Set(["hello-world", "btc-price"] as const);
+const LAUNCHPAD_MIN_PRICE = 0.001;
+const LAUNCHPAD_MAX_PRICE = 0.1;
+const _launchpad = new Map<string, LaunchpadEntry>();
+
+function isValidBaseAddress(addr: unknown): addr is string {
+  return typeof addr === "string" && /^0x[0-9a-fA-F]{40}$/.test(addr);
+}
+
+async function runLaunchpadTemplate(template: LaunchpadEntry["template"]): Promise<Record<string, unknown>> {
+  if (template === "hello-world") {
+    return { message: "Hello from x402 Launchpad", timestamp: Date.now() };
+  }
+  // btc-price — real upstream fetch, never a hardcoded/fabricated price.
+  try {
+    const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+    if (!r.ok) return { error: "upstream_error", status: r.status };
+    const body = (await r.json()) as { bitcoin?: { usd?: number } };
+    if (typeof body.bitcoin?.usd !== "number") return { error: "upstream_error", detail: "unexpected response shape" };
+    return { symbol: "BTC", priceUsd: body.bitcoin.usd, source: "coingecko", timestamp: Date.now() };
+  } catch (err) {
+    return { error: "upstream_error", detail: String(err) };
+  }
+}
+
+app.post("/launchpad/deploy", (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const { template, walletAddress } = body;
+  const priceUsd = Number(body.priceUsd);
+
+  if (typeof template !== "string" || !LAUNCHPAD_TEMPLATES.has(template as any)) {
+    res.status(400).json({ error: "invalid_template", allowed: [...LAUNCHPAD_TEMPLATES] });
+    return;
+  }
+  if (!Number.isFinite(priceUsd) || priceUsd < LAUNCHPAD_MIN_PRICE || priceUsd > LAUNCHPAD_MAX_PRICE) {
+    res.status(400).json({ error: "invalid_price", min: LAUNCHPAD_MIN_PRICE, max: LAUNCHPAD_MAX_PRICE });
+    return;
+  }
+  if (!isValidBaseAddress(walletAddress)) {
+    res.status(400).json({ error: "invalid_wallet_address", detail: "must be a 0x-prefixed, 40-hex-char Base address" });
+    return;
+  }
+
+  const id = crypto.randomBytes(6).toString("hex");
+  const entry: LaunchpadEntry = {
+    id,
+    template: template as LaunchpadEntry["template"],
+    priceUsd,
+    walletAddress,
+    createdAt: new Date().toISOString(),
+    callCount: 0,
+  };
+  _launchpad.set(id, entry);
+
+  res.json({
+    id,
+    apiUrl: `${PUBLIC_BASE_URL}/launchpad/api/${id}`,
+    template: entry.template,
+    priceUsd,
+    walletAddress,
+    note: "Live now on ScriptMasterLabs' shared gateway — no Cloudflare/Vercel account needed. Payment settles directly to your wallet; this server never holds the funds.",
+  });
+});
+
+app.get("/launchpad/registry", (_req: Request, res: Response) => {
+  const entries = [..._launchpad.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.json({ entries });
+});
+
+app.get("/launchpad/api/:id", async (req: Request, res: Response) => {
+  const entry = _launchpad.get(req.params.id);
+  if (!entry) {
+    res.status(404).json({ error: "unknown_launchpad_api" });
+    return;
+  }
+
+  // Ecosystem-standard raw-tx-hash header (same convention as hermes-loop.html,
+  // watch-the-agent-pay.html, scripts/pay-snack.sh in SML_Portfolio) rather than
+  // this server's internal base64-JSON X-Payment-Proof — Launchpad's whole point
+  // is that any agent following the publicly documented convention can pay it.
+  const proofTx = req.header("X-PAYMENT-TX");
+  const usdcAtomicAmount = Math.round(entry.priceUsd * 1_000_000).toString();
+
+  if (!proofTx) {
+    res.status(402).json({
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: "exact",
+          network: "base",
+          amount: usdcAtomicAmount,
+          payTo: entry.walletAddress,
+          maxTimeoutSeconds: 60,
+          asset: USDC_BASE_CONTRACT,
+          extra: { name: "USD Coin", version: "2", symbol: "USDC", decimals: 6 },
+        },
+      ],
+      description: `x402 Launchpad — ${entry.template}`,
+      resource: `${PUBLIC_BASE_URL}/launchpad/api/${entry.id}`,
+    });
+    return;
+  }
+
+  // Adapts the raw hash into the { txHash } claim shape verifyBaseUsdcPayment
+  // expects, then runs the exact same real on-chain check (receipt lookup,
+  // USDC Transfer log match, amount check, Redis replay guard) as /vend/dynamic.
+  const proofClaim = Buffer.from(JSON.stringify({ txHash: proofTx })).toString("base64");
+  const result = await verifyBaseUsdcPayment(proofClaim, entry.walletAddress, entry.priceUsd.toFixed(6), redis);
+  if (!result.valid) {
+    res.status(402).json({ error: result.error, hint: "Retry with X-PAYMENT-TX once the transfer is confirmed on Base." });
+    return;
+  }
+
+  entry.callCount += 1;
+  entry.lastCallAt = new Date().toISOString();
+
+  res.json(await runLaunchpadTemplate(entry.template));
 });
 
 // GET /mcp — friendly info summary for a human browser hitting this URL

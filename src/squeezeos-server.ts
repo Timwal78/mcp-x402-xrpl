@@ -39,6 +39,7 @@ import { createOrchestrateHandler } from "./orchestrate.js";
 import { CreditBureau } from "./credit-bureau.js";
 import { ToolCatalog } from "./tool-catalog.js";
 import { verifyPayment } from "./payment-verifier.js";
+import { verifyAndSettleViaCdp, CDP_CONFIGURED, X402_NETWORK } from "./cdp-facilitator.js";
 import { fetchEquityCloses, fetchOptionsChainSnapshot, type EquityTimeframe } from "./market-data.js";
 import { computeRSI } from "./indicators.js";
 import { blackScholesDelta } from "./greeks.js";
@@ -828,9 +829,51 @@ async function dynamicPriceGate(req: Request, res: Response, next: NextFunction)
   const agentDid = (req as Request & { agentDid: string }).agentDid ?? "did:anonymous";
   const score = await bureau.getScore(agentDid);
   const proofHeader = req.headers["x-payment-proof"] as string | undefined;
+  const standardPaymentHeader = req.headers["x-payment"] as string | undefined;
 
   // Compute price first — used in both proof verification and 402 response
   const price = score >= 800 ? "0.06" : score >= 700 ? VIP_PRICE_RLUSD : COUNCIL_PRICE_RLUSD;
+
+  // Standard x402 rail: real x402 clients (x402-fetch, Agentic.Market) respond
+  // to the 402 challenge's accepts[0] (Base/USDC, already correctly formatted
+  // by buildCanonicalX402Accepts) with a plain `X-PAYMENT` header -- a payment
+  // AUTHORIZATION for the server to submit via a facilitator, not a
+  // pre-executed tx hash. Until this branch existed, nothing in this codebase
+  // understood that header at all: only the custom X-Payment-Proof /
+  // X-PAYMENT-TX schemes (pre-submitted tx hash, verified via direct on-chain
+  // RPC reads) were handled. A standards-compliant client had no way to
+  // actually complete a purchase here, and -- separately -- Coinbase's Bazaar/
+  // Agentic.Market discovery only indexes a route after a real /settle
+  // succeeds through THEIR OWN CDP facilitator carrying the bazaar extensions
+  // metadata; direct-RPC verification never touches that facilitator, so it
+  // could never trigger discovery no matter how many payments cleared that
+  // way. See cdp-facilitator.ts's module docstring for the full writeup.
+  //
+  // Checked before the X-Payment-Proof branch since a real x402 client sends
+  // ONLY X-PAYMENT; falls through to the existing branches (not `return`s) on
+  // failure so an expired/invalid X-PAYMENT still gets a proper 402 back
+  // rather than a dead end.
+  if (!proofHeader && standardPaymentHeader && CDP_CONFIGURED) {
+    const usdcAtomicAmount = Math.round(parseFloat(price) * 1_000_000).toString();
+    const cdpResult = await verifyAndSettleViaCdp(standardPaymentHeader, {
+      scheme: "exact",
+      network: X402_NETWORK,
+      amount: usdcAtomicAmount,
+      payTo: RECEIVING_ADDRESS_BASE,
+      maxTimeoutSeconds: 60,
+      asset: USDC_BASE_CONTRACT,
+      resource: `${req.protocol}://${req.get("host")}${req.originalUrl}`,
+      description: `SqueezeOS — ${price} USDC via x402 (score ${score})`,
+      mimeType: "application/json",
+    });
+    if (cdpResult.success) {
+      (req as Request & { verifiedPayer?: string }).verifiedPayer = cdpResult.payer;
+      next();
+      return;
+    }
+    console.error(`[x402/CDP] settle failed for ${agentDid} on ${req.path}: ${cdpResult.error}`);
+    // no return -- fall through to the existing 402/403 issuance below
+  }
 
   if (proofHeader) {
     // Verify payment on-chain before granting access — auto-detects XRPL vs

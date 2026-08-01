@@ -39,11 +39,11 @@
       "@type": "SoftwareApplication",
       "@id": "https://github.com/Timwal78/mcp-x402-xrpl#app",
       "name": "mcp-x402-xrpl",
-      "alternateName": "@scriptmasterlabs/mcp-x402",
+      "alternateName": "@scriptmasterlabs/mcp-x402-xrpl",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Node.js >= 18",
       "url": "https://github.com/Timwal78/mcp-x402-xrpl",
-      "downloadUrl": "https://npmjs.com/package/@scriptmasterlabs/mcp-x402",
+      "downloadUrl": "https://npmjs.com/package/@scriptmasterlabs/mcp-x402-xrpl",
       "softwareVersion": "0.1.0",
       "datePublished": "2025-06-01",
       "license": "https://opensource.org/licenses/Apache-2.0",
@@ -96,7 +96,7 @@
           "name": "How does x402 work with MCP and XRPL?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "When an AI agent calls a gated MCP tool, the server responds with HTTP 402 Payment Required. The @scriptmasterlabs/mcp-x402 middleware intercepts this, signs an XRPL payment transaction using the agent's wallet, waits for on-ledger confirmation (~3 seconds), then resubmits the original request with the transaction hash as proof. The server verifies the payment on XRPL and returns the tool result."
+            "text": "When an AI agent calls a gated MCP tool, the server responds with HTTP 402 Payment Required. The @scriptmasterlabs/mcp-x402-xrpl middleware intercepts this, signs an XRPL payment transaction using the agent's wallet, waits for on-ledger confirmation (~3 seconds), then resubmits the original request with the transaction hash as proof. The server verifies the payment on XRPL and returns the tool result."
           }
         },
         {
@@ -112,7 +112,7 @@
           "name": "Is mcp-x402-xrpl the only x402 implementation for XRPL?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes. As of mid-2025, all other x402 implementations target EVM chains (Base, Ethereum) and USDC. @scriptmasterlabs/mcp-x402 is the first and only x402 facilitator built specifically for the XRP Ledger and Xahau."
+            "text": "Yes. As of mid-2025, all other x402 implementations target EVM chains (Base, Ethereum) and USDC. @scriptmasterlabs/mcp-x402-xrpl is the first and only x402 facilitator built specifically for the XRP Ledger and Xahau."
           }
         }
       ]

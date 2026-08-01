@@ -107,7 +107,7 @@ already needed:
 
 ## Why contracts live in `asc-contracts/` instead of `src/`
 
-The parent package (`@scriptmasterlabs/mcp-x402`) is ESM, built with `tsc`
+The parent package (`@scriptmasterlabs/mcp-x402-xrpl`) is ESM, built with `tsc`
 and run with `tsx`. Hardhat's toolchain (and `hardhat-toolbox`) assumes
 CommonJS. Rather than fighting that mismatch in one `tsconfig.json`,
 `asc-contracts/` is a self-contained project with its own `package.json` —

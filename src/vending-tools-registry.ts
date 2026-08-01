@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * vending-tools-registry.ts — the single source of truth for the ScriptMaster
  * Agentic Vending Router's tool list. vending-router-server.ts registers this

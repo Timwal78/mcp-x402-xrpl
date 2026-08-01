@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * xrpl-facilitator.ts — XRPL/Xahau payment facilitator.
  *

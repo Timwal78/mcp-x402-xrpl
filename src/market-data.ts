@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * market-data.ts — Polygon.io client for equities bars and options chain
  * snapshots. Never returns mock data: a missing key or an upstream error

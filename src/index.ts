@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402 — Public API barrel
+ * @scriptmasterlabs/mcp-x402-xrpl — Public API barrel
  *
  * Everything a consumer needs is exported from this single file.
  */

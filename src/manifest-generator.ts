@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * manifest-generator.ts — builds the machine-readable manifest.json for an
  * x402-gated MCP server from a single tool-registry array, and can write it

@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * indicators.ts — Self-contained technical indicator math.
  *

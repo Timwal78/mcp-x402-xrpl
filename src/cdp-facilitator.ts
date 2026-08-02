@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * cdp-facilitator.ts — Coinbase CDP x402 facilitator client (verify + settle).
  *

@@ -1,11 +1,11 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * mcp-wrapper.ts — Drop-in wrapper that adds x402 XRPL payment gating
  * to any existing MCP (Model Context Protocol) server.
  *
  * Usage:
- *   import { wrapMcpServer } from "@scriptmasterlabs/mcp-x402";
+ *   import { wrapMcpServer } from "@scriptmasterlabs/mcp-x402-xrpl";
  *   const server = wrapMcpServer(myMcpServer, { ... });
  *
  * The wrapper intercepts tool calls, checks for payment proof,
@@ -49,7 +49,7 @@ export interface McpServerOptions {
  *
  * @example
  * ```ts
- * import { wrapMcpServer } from "@scriptmasterlabs/mcp-x402";
+ * import { wrapMcpServer } from "@scriptmasterlabs/mcp-x402-xrpl";
  *
  * const server = wrapMcpServer({
  *   x402: { walletSeed: process.env.XRPL_WALLET_SEED!, network: "xrpl-mainnet" },

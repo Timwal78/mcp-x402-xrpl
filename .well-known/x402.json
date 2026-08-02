@@ -4,7 +4,7 @@
   "maintainer": "ScriptMasterLabs",
   "homepage": "https://scriptmasterlabs.com",
   "repository": "https://github.com/Timwal78/mcp-x402-xrpl",
-  "npm": "@scriptmasterlabs/mcp-x402",
+  "npm": "@scriptmasterlabs/mcp-x402-xrpl",
   "networks": [
     {
       "id": "xrpl-mainnet",

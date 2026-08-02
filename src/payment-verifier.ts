@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * payment-verifier.ts — On-chain payment verification, XRPL/RLUSD + Base/USDC
  *

@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * heatmap.ts — Groups scored items (RSI, Delta, ...) into the "overbought /
  * oversold" heatmap shape: N groups, each with its members and avg/min/max,

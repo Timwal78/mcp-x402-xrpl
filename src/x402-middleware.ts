@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * x402-middleware.ts — Express-compatible middleware that intercepts HTTP 402
  * Payment Required responses and fulfils them using an XRPL wallet.
@@ -93,7 +93,7 @@ export interface X402MiddlewareOptions {
  * @example
  * ```ts
  * import express from "express";
- * import { createX402Middleware } from "@scriptmasterlabs/mcp-x402";
+ * import { createX402Middleware } from "@scriptmasterlabs/mcp-x402-xrpl";
  *
  * const app = express();
  * app.use(createX402Middleware({

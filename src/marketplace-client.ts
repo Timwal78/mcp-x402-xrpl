@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * marketplace-client.ts — real, persistent listing directory backed by
  * Supabase Postgres. This is a genuine multi-seller marketplace: anyone

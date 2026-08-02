@@ -1,6 +1,6 @@
 /**
  * LEVIATHAN — Virtuals Protocol ACP Seller Agent
- * ScriptMasterLabs | @scriptmasterlabs/mcp-x402
+ * ScriptMasterLabs | @scriptmasterlabs/mcp-x402-xrpl
  *
  * 23 institutional-grade offerings on the Virtuals ACP marketplace.
  * Buyers pay USDC on Base chain via Virtuals Protocol ACP v2.

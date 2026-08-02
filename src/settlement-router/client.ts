@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * settlement-router/client.ts — thin ethers wrapper around the deployed
  * SettlementRouter contract (asc-contracts/contracts/settlement-router/).

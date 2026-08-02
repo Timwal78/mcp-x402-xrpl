@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * ghost-layer-client.ts — real HTTP client for the live Ghost Layer bridge
  * (Go service, `ghost-layer.onrender.com`, source in the SqueezeOS repo under

@@ -1,5 +1,5 @@
 /**
- * @scriptmasterlabs/mcp-x402
+ * @scriptmasterlabs/mcp-x402-xrpl
  *
  * tool-catalog.ts — Machine-readable tool manifest for /.well-known/mcp
  *
@@ -80,7 +80,7 @@ export class ToolCatalog {
   getManifest(): ToolCatalogManifest {
     return {
       schema: "mcp-server-card/v1",
-      server: "@scriptmasterlabs/mcp-x402 — SqueezeOS Signal OS",
+      server: "@scriptmasterlabs/mcp-x402-xrpl — SqueezeOS Signal OS",
       version: "2.1.1",
       generatedAt: new Date().toISOString(),
       paymentProtocol: "x402",

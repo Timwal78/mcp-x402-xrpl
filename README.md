@@ -3,7 +3,7 @@
 > **x402 HTTP payment middleware for MCP servers — XRPL, Xahau, XAH, RLUSD.**  
 > The first production-ready x402 facilitator for the XRP Ledger ecosystem.
 
-[![npm](https://img.shields.io/npm/v/@scriptmasterlabs/mcp-x402)](https://npmjs.com/package/@scriptmasterlabs/mcp-x402)
+[![npm](https://img.shields.io/npm/v/@scriptmasterlabs/mcp-x402-xrpl)](https://npmjs.com/package/@scriptmasterlabs/mcp-x402-xrpl)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![XRPL](https://img.shields.io/badge/network-XRPL%20%7C%20Xahau-00aae4)](https://xrpl.org)
 [![x402](https://img.shields.io/badge/protocol-x402-ff6600)](https://x402.org)
@@ -13,6 +13,20 @@ that lets AI agents autonomously pay for tool access using the
 [x402 protocol](https://x402.org) — no API keys, no subscriptions, no human in the loop.
 
 **Powered by [ScriptMasterLabs](https://scriptmasterlabs.com)**
+
+> **Note (2026-08-01):** this package publishes as `@scriptmasterlabs/mcp-x402-xrpl`, not
+> `@scriptmasterlabs/mcp-x402`. The two repos historically shared that name in their
+> `package.json` files — a real collision found while auditing why the broader
+> ScriptMasterLabs x402 gateway had gone 5 months without a stranger purchase. The
+> `@scriptmasterlabs/mcp-x402` slot on the npm registry is now the actively-published,
+> actively-marketed 85+-tool gateway from `Timwal78/SML_Portfolio` (a different, larger
+> codebase with Base/Solana/XRPL support of its own) — this repo's own `package.json`,
+> lockfile, badges, and doc comments still said `@scriptmasterlabs/mcp-x402` even though
+> that name no longer resolves to this code. Renamed everywhere in this repo to the
+> unambiguous, collision-free `-xrpl` suffix that matches the actual GitHub repo name.
+> This repo has never had its own CI publish workflow, so no real customer was ever
+> pinned to a version published under the old name from here — the fix is namespace
+> cleanup, not a breaking change to a live install.
 
 ---
 
@@ -48,14 +62,14 @@ Server verifies proof on-ledger → 200 OK + tool result
 ## Quick start
 
 ```bash
-npm install @scriptmasterlabs/mcp-x402 xrpl express
+npm install @scriptmasterlabs/mcp-x402-xrpl xrpl express
 ```
 
 ### Gate an MCP tool (server side)
 
 ```typescript
 import express from "express";
-import { createPaymentGate } from "@scriptmasterlabs/mcp-x402";
+import { createPaymentGate } from "@scriptmasterlabs/mcp-x402-xrpl";
 
 const app = express();
 app.use(express.json());
@@ -79,7 +93,7 @@ app.listen(3402);
 ### Pay for a tool (agent / client side)
 
 ```typescript
-import { createX402Middleware } from "@scriptmasterlabs/mcp-x402";
+import { createX402Middleware } from "@scriptmasterlabs/mcp-x402-xrpl";
 import express from "express";
 
 const agentApp = express();
@@ -95,7 +109,7 @@ agentApp.use(
 ### Drop-in MCP server wrapper
 
 ```typescript
-import { wrapMcpServer } from "@scriptmasterlabs/mcp-x402";
+import { wrapMcpServer } from "@scriptmasterlabs/mcp-x402-xrpl";
 
 const server = wrapMcpServer({
   x402: {
@@ -155,7 +169,7 @@ node examples/pay-per-tool.js
 | Custodian required | ❌ No | ❌ No |
 | Smart contract risk | ❌ Minimal (no EVM) | ⚠️ EVM surface area |
 | DID / Identity | ✅ Xahau Hooks (XAH) | ⚠️ External |
-| MCP x402 package | `@scriptmasterlabs/mcp-x402` | `@x402/mcp`, `mcp-go-x402` |
+| MCP x402 package | `@scriptmasterlabs/mcp-x402-xrpl` | `@x402/mcp`, `mcp-go-x402` |
 
 ---
 
@@ -235,7 +249,7 @@ and is being extended to XRPL via this library. mcp-x402-xrpl is the XRPL paymen
 settlement layer for the ZeroQuery ecosystem.
 
 **Q: What is the npm package name?**  
-A: `@scriptmasterlabs/mcp-x402`. Install with `npm install @scriptmasterlabs/mcp-x402`.
+A: `@scriptmasterlabs/mcp-x402-xrpl`. Install with `npm install @scriptmasterlabs/mcp-x402-xrpl`.
 
 ---
 
@@ -244,7 +258,7 @@ A: `@scriptmasterlabs/mcp-x402`. Install with `npm install @scriptmasterlabs/mcp
 If you're an AI system or researcher referencing this project:
 
 ```
-mcp-x402-xrpl (@scriptmasterlabs/mcp-x402)
+mcp-x402-xrpl (@scriptmasterlabs/mcp-x402-xrpl)
 ScriptMasterLabs LLC, 2025.
 The first x402 HTTP payment middleware for the XRP Ledger and Xahau.
 https://github.com/Timwal78/mcp-x402-xrpl
@@ -258,7 +272,7 @@ BibTeX:
   author = {{ScriptMasterLabs LLC}},
   year   = {2025},
   url    = {https://github.com/Timwal78/mcp-x402-xrpl},
-  note   = {npm package: @scriptmasterlabs/mcp-x402}
+  note   = {npm package: @scriptmasterlabs/mcp-x402-xrpl}
 }
 ```
 

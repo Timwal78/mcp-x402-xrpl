@@ -9,7 +9,7 @@
  *
  * Registration: app.virtuals.io/acp/agents/
  * Required env vars:
- *   ACP_WALLET_ADDRESS      — 0x4e14B249D9A4c9c9352D780eCEB508A8eB7a7700
+ *   ACP_WALLET_ADDRESS      — 0x72330994f379a71542e7bd5a4cf99a9d9743f4aa
  *   ACP_WALLET_ID           — from app.virtuals.io → Signers tab
  *   ACP_SIGNER_PRIVATE_KEY  — from app.virtuals.io → Signers tab
  *   LEVIATHAN_BYPASS_SECRET — shared with squeezeos-server (payment bypass)
@@ -27,7 +27,7 @@ import { base } from "@account-kit/infra";
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 const WALLET_ADDRESS = (
-  process.env.ACP_WALLET_ADDRESS ?? "0x4e14B249D9A4c9c9352D780eCEB508A8eB7a7700"
+  process.env.ACP_WALLET_ADDRESS ?? "0x72330994f379a71542e7bd5a4cf99a9d9743f4aa"
 ) as `0x${string}`;
 
 const WALLET_ID = process.env.ACP_WALLET_ID ?? "";

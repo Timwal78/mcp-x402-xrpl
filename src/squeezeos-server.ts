@@ -60,7 +60,7 @@ const NETWORK = (process.env.XRPL_NETWORK ?? "xrpl-mainnet") as "xrpl-mainnet" |
  * never pass payment_verification_failed no matter how correct their payment
  * was. See payment-verifier.ts verifyPayment().
  */
-const RECEIVING_ADDRESS_BASE = process.env.BASE_RECEIVING_ADDRESS ?? "0x4e14B249D9A4c9c9352D780eCEB508A8eB7a7700";
+const RECEIVING_ADDRESS_BASE = process.env.BASE_RECEIVING_ADDRESS ?? "0x72330994f379a71542e7bd5a4cf99a9d9743f4aa";
 
 /**
  * URL of the upstream SqueezeOS Python intelligence server.
